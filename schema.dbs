@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<project name="book_sever" database="LogicalDesign" id="ad2d4428-610f-427f-8cdd-9c479ccfbced" >
+	<schema name="Schema_" >
+		<table name="Entity" />
+		<table name="author" prior="Enti" >
+			<column name="author_uuid" type="UUID" mandatory="y" />
+			<column name="author_name" type="NVARCHAR" length="100" mandatory="y" />
+			<index name="pk_author_uuid" unique="UNIQUE_KEY" >
+				<column name="author_uuid" />
+			</index>
+			<index name="unq_author_author_uuid" unique="UNIQUE_KEY" >
+				<column name="author_uuid" />
+			</index>
+			<index name="pk_author" unique="PRIMARY_KEY" >
+				<column name="author_uuid" />
+			</index>
+		</table>
+		<table name="book" prior="bo" >
+			<column name="book_uuid" type="UUID" mandatory="y" />
+			<column name="book_title" prior="book_name" type="VARCHAR" mandatory="y" />
+			<column name="book_description" type="TEXT" />
+			<column name="price" type="DECIMAL" mandatory="y" />
+			<column name="publish_date" type="DATE" mandatory="y" />
+			<column name="publisher" type="NVARCHAR" length="100" mandatory="y" />
+			<column name="inventory" type="INT" mandatory="y" />
+			<index name="pk_book" unique="PRIMARY_KEY" >
+				<column name="book_uuid" />
+			</index>
+		</table>
+		<table name="book_author" prior="book_auth" >
+			<column name="book_uuid" type="UUID" mandatory="y" />
+			<column name="author_uuid" prior="author" type="UUID" mandatory="y" />
+			<index name="idx_book_author" unique="UNIQUE_KEY" >
+				<column name="book_uuid" />
+				<column name="author_uuid" />
+			</index>
+			<index name="pk_book_uuid" unique="PRIMARY_KEY" >
+				<column name="book_uuid" />
+			</index>
+			<index name="unq_book_author_book_uuid" unique="UNIQUE_KEY" >
+				<column name="book_uuid" />
+			</index>
+			<fk name="fk_book_author_book" to_schema="Schema_" to_table="book" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
+				<fk_column name="book_uuid" pk="book_uuid" />
+			</fk>
+			<fk name="fk_book_author_author" to_schema="Schema_" to_table="author" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
+				<fk_column name="author_uuid" pk="author_uuid" />
+			</fk>
+		</table>
+		<table name="book_user" prior="book_" >
+			<column name="user_uuid" prior="user_id" type="UUID" mandatory="y" />
+			<column name="user_name" type="NVARCHAR" length="100" mandatory="y" />
+			<column name="user_password" prior="user_id" type="VARCHAR" length="100" mandatory="y" />
+			<column name="user_id" type="VARCHAR" mandatory="y" />
+			<column name="created_at" type="DATETIME" length="9999999" />
+			<index name="pk_book_user" unique="PRIMARY_KEY" >
+				<column name="user_uuid" />
+			</index>
+		</table>
+		<table name="cart" prior="car" />
+		<table name="cart_item" prior="Entity_0" >
+			<column name="user_uuid" type="UUID" mandatory="y" />
+			<column name="book_uuid" type="UUID" mandatory="y" />
+			<column name="quantity" type="INT" mandatory="y" />
+			<column name="created_at" type="DATETIME" mandatory="y" />
+			<index name="unq_cart_item" unique="UNIQUE_KEY" >
+				<column name="user_uuid" />
+				<column name="book_uuid" />
+			</index>
+			<fk name="fk_cart_item_book" to_schema="Schema_" to_table="book" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
+				<fk_column name="book_uuid" pk="book_uuid" />
+			</fk>
+			<fk name="fk_cart_item_book_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
+				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+		</table>
+		<table name="purchase_book_history" prior="purchase_book" >
+			<column name="book_uuid" type="UUID" mandatory="y" />
+			<column name="price" type="DECIMAL" length="9999999" mandatory="y" />
+			<column name="quantity" type="INT" mandatory="y" />
+			<column name="purchase_state" type="ENUM" mandatory="y" />
+			<column name="updated_at" type="DATETIME" mandatory="y" />
+			<column name="history_uuid" type="UUID" mandatory="y" />
+			<index name="unq_purchase_book_history_history_uuid" unique="UNIQUE_KEY" >
+				<column name="history_uuid" />
+				<column name="book_uuid" />
+			</index>
+			<fk name="fk_purchase_book_book" to_schema="Schema_" to_table="purchase_history" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
+				<fk_column name="history_uuid" pk="hisotry_uuid" />
+			</fk>
+			<fk name="fk_purchase_book_history_book" to_schema="Schema_" to_table="book" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
+				<fk_column name="book_uuid" pk="book_uuid" />
+			</fk>
+		</table>
+		<table name="purchase_history" prior="purchase" >
+			<column name="hisotry_uuid" prior="hisotry_id" type="UUID" mandatory="y" />
+			<column name="purchase_uuid" prior="purcase_uuid" type="UUID" mandatory="y" />
+			<column name="user_uuid" type="UUID" mandatory="y" />
+			<column name="purchase_state" prior="state" type="ENUM" mandatory="y" />
+			<column name="updated_at" prior="order_datetime" type="DATETIME" mandatory="y" />
+			<column name="price" type="DECIMAL" length="9999999" mandatory="y" />
+			<index name="pk_purchase" unique="PRIMARY_KEY" >
+				<column name="hisotry_uuid" />
+			</index>
+			<fk name="fk_purchase_book_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
+				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+		</table>
+	</schema>
+	<diagram_group name="Default" id="cbcc5be2-a937-48fd-9091-231b53f9a039" >
+		<diagram name="Default Diagram" id="68c731c4-2254-4bfa-87d7-dc7653a67353" show_relation="columns" >
+			<entity schema="Schema_" name="author" color="C1D8EE" x="969" y="57" />
+			<entity schema="Schema_" name="book" color="C1D8EE" x="513" y="57" />
+			<entity schema="Schema_" name="book_author" color="C1D8EE" x="760" y="57" />
+			<entity schema="Schema_" name="book_user" color="C1D8EE" x="57" y="57" />
+			<entity schema="Schema_" name="cart_item" color="C1D8EE" x="304" y="57" />
+			<entity schema="Schema_" name="purchase_book_history" color="C1D8EE" x="513" y="342" />
+			<entity schema="Schema_" name="purchase_history" color="C1D8EE" x="171" y="342" />
+		</diagram>
+	</diagram_group>
+</project>
