@@ -21,14 +21,14 @@ public class AuthorMapperTest {
     // Verifies: findById returns null when no author with that id exists.
     @Test
     void findById_returnsNull_whenNotExists() {
-        Author found = authorMapper.findById(UUID.randomUUID());
+        Author found = authorMapper.findById(Uuids.newId());
         assertThat(found).isNull();
     }
 
     // Verifies: an inserted author can be read back by id with its fields intact.
     @Test
     void findById() {
-        UUID authorUuid = UUID.randomUUID();
+        UUID authorUuid = Uuids.newId();
         String authorName = "Jane Doe";
         Author author = new Author(authorUuid, authorName);
 
@@ -43,7 +43,7 @@ public class AuthorMapperTest {
     // Verifies: update changes the author's name and the new value persists.
     @Test
     void update() {
-        UUID authorUuid = UUID.randomUUID();
+        UUID authorUuid = Uuids.newId();
         authorMapper.insert(new Author(authorUuid, "Jane Doe"));
 
         authorMapper.update(new Author(authorUuid, "Jane Smith"));
@@ -55,7 +55,7 @@ public class AuthorMapperTest {
     // Verifies: delete removes the author so it can no longer be found.
     @Test
     void delete() {
-        UUID authorUuid = UUID.randomUUID();
+        UUID authorUuid = Uuids.newId();
         authorMapper.insert(new Author(authorUuid, "Jane Doe"));
 
         authorMapper.delete(authorUuid);

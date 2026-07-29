@@ -28,7 +28,7 @@ public class PurchaseHistoryMapperTest {
 
     // FK parent: a purchase_history row references an existing user
     private UUID persistUser() {
-        UUID userUuid = UUID.randomUUID();
+        UUID userUuid = Uuids.newId();
         User user = new User();
         user.setUserUuid(userUuid);
         user.setUserId("u-" + userUuid);
@@ -43,7 +43,7 @@ public class PurchaseHistoryMapperTest {
     // updatedAt is the moment this state took effect — supplied by the caller (the app)
     private PurchaseHistory event(UUID purchaseUuid, UUID userUuid, PurchaseState state, LocalDateTime updatedAt) {
         PurchaseHistory h = new PurchaseHistory();
-        h.setHistoryUuid(UUID.randomUUID());
+        h.setHistoryUuid(Uuids.newId());
         h.setPurchaseUuid(purchaseUuid);
         h.setUserUuid(userUuid);
         h.setPurchaseState(state);
@@ -57,7 +57,7 @@ public class PurchaseHistoryMapperTest {
     @Test
     void insert_and_findLatestByPurchaseUuid() {
         UUID userUuid = persistUser();
-        UUID purchaseUuid = UUID.randomUUID();
+        UUID purchaseUuid = Uuids.newId();
 
         purchaseHistoryMapper.insert(event(purchaseUuid, userUuid, PurchaseState.PAYMENT_PENDING, BASE));
         purchaseHistoryMapper.insert(event(purchaseUuid, userUuid, PurchaseState.ORDERED, BASE.plusMinutes(1)));
@@ -73,7 +73,7 @@ public class PurchaseHistoryMapperTest {
     @Test
     void findAllByPurchaseUuid_returnsStatesInOrder() {
         UUID userUuid = persistUser();
-        UUID purchaseUuid = UUID.randomUUID();
+        UUID purchaseUuid = Uuids.newId();
 
         purchaseHistoryMapper.insert(event(purchaseUuid, userUuid, PurchaseState.PAYMENT_PENDING, BASE));
         purchaseHistoryMapper.insert(event(purchaseUuid, userUuid, PurchaseState.ORDERED, BASE.plusMinutes(1)));
@@ -90,14 +90,14 @@ public class PurchaseHistoryMapperTest {
     // Verifies: findLatest returns null for a purchase that has no history yet.
     @Test
     void findLatest_returnsNull_whenNoHistory() {
-        assertThat(purchaseHistoryMapper.findLatestByPurchaseUuid(UUID.randomUUID())).isNull();
+        assertThat(purchaseHistoryMapper.findLatestByPurchaseUuid(Uuids.newId())).isNull();
     }
 
     // Verifies: deleteByPurchaseUuid removes every history row of that purchase.
     @Test
     void deleteByPurchaseUuid_removesAllHistory() {
         UUID userUuid = persistUser();
-        UUID purchaseUuid = UUID.randomUUID();
+        UUID purchaseUuid = Uuids.newId();
         purchaseHistoryMapper.insert(event(purchaseUuid, userUuid, PurchaseState.PAYMENT_PENDING, BASE));
         purchaseHistoryMapper.insert(event(purchaseUuid, userUuid, PurchaseState.ORDERED, BASE.plusMinutes(1)));
 

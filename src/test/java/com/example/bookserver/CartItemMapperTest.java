@@ -26,7 +26,7 @@ public class CartItemMapperTest {
 
     // --- helpers: FK parents must exist before a cart_item can reference them ---
     private UUID persistUser() {
-        UUID userUuid = UUID.randomUUID();
+        UUID userUuid = Uuids.newId();
         User user = new User();
         user.setUserUuid(userUuid);
         user.setUserId("u-" + userUuid);   // unique login id
@@ -39,7 +39,7 @@ public class CartItemMapperTest {
     }
 
     private UUID persistBook() {
-        UUID bookUuid = UUID.randomUUID();
+        UUID bookUuid = Uuids.newId();
         Book book = new Book();
         book.setBookUuid(bookUuid);
         book.setBookTitle("Clean Architecture");
