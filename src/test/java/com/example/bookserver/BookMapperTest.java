@@ -36,6 +36,8 @@ public class BookMapperTest {
     }
 
     // 1. own table only — no relation involved
+    // Verifies: an inserted book round-trips its own columns, and findById
+    // (the no-authors variant) leaves the authors field null.
     @Test
     void insert_and_findBook() {
         UUID bookId = UUID.randomUUID();
@@ -51,6 +53,8 @@ public class BookMapperTest {
     }
 
     // 2. the M:N relation on its own
+    // Verifies: after linking authors to a book, findAuthorsByBookId returns
+    // exactly those authors (the join table + join query work).
     @Test
     void linkAuthor_and_findAuthorsByBookId() {
         UUID bookId = UUID.randomUUID();
@@ -70,6 +74,8 @@ public class BookMapperTest {
     }
 
     // 3. integration happy-path — book + nested authors assembled by @Many
+    // Verifies: findByIdWithAuthors assembles the book together with its
+    // nested authors list via the @Many mapping.
     @Test
     void findByIdWithAuthors_returnsBookAndAuthors() {
         UUID bookId = UUID.randomUUID();
@@ -91,6 +97,8 @@ public class BookMapperTest {
     }
 
     // 4. update
+    // Verifies: update writes every mutable column correctly — each field is
+    // changed to a distinct value so a broken SET mapping cannot slip through.
     @Test
     void update() {
         UUID bookId = UUID.randomUUID();
@@ -117,6 +125,7 @@ public class BookMapperTest {
     }
 
     // 5. delete
+    // Verifies: delete removes the book so it can no longer be found.
     @Test
     void delete() {
         UUID bookId = UUID.randomUUID();
