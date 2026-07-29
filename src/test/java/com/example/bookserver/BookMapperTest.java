@@ -40,7 +40,7 @@ public class BookMapperTest {
     // (the no-authors variant) leaves the authors field null.
     @Test
     void insert_and_findBook() {
-        UUID bookId = UUID.randomUUID();
+        UUID bookId = Uuids.newId();
         bookMapper.insert(sampleBook(bookId));
 
         Book found = bookMapper.findById(bookId);
@@ -57,9 +57,9 @@ public class BookMapperTest {
     // exactly those authors (the join table + join query work).
     @Test
     void linkAuthor_and_findAuthorsByBookId() {
-        UUID bookId = UUID.randomUUID();
-        Author a1 = new Author(UUID.randomUUID(), "Robert Martin");
-        Author a2 = new Author(UUID.randomUUID(), "John Doe");
+        UUID bookId = Uuids.newId();
+        Author a1 = new Author(Uuids.newId(), "Robert Martin");
+        Author a2 = new Author(Uuids.newId(), "John Doe");
 
         // FK requires both sides to exist before linking
         authorMapper.insert(a1);
@@ -78,9 +78,9 @@ public class BookMapperTest {
     // nested authors list via the @Many mapping.
     @Test
     void findByIdWithAuthors_returnsBookAndAuthors() {
-        UUID bookId = UUID.randomUUID();
-        Author a1 = new Author(UUID.randomUUID(), "Robert Martin");
-        Author a2 = new Author(UUID.randomUUID(), "John Doe");
+        UUID bookId = Uuids.newId();
+        Author a1 = new Author(Uuids.newId(), "Robert Martin");
+        Author a2 = new Author(Uuids.newId(), "John Doe");
 
         authorMapper.insert(a1);
         authorMapper.insert(a2);
@@ -101,7 +101,7 @@ public class BookMapperTest {
     // changed to a distinct value so a broken SET mapping cannot slip through.
     @Test
     void update() {
-        UUID bookId = UUID.randomUUID();
+        UUID bookId = Uuids.newId();
         bookMapper.insert(sampleBook(bookId));
 
         // change every mutable field to a distinct value so a broken
@@ -128,7 +128,7 @@ public class BookMapperTest {
     // Verifies: delete removes the book so it can no longer be found.
     @Test
     void delete() {
-        UUID bookId = UUID.randomUUID();
+        UUID bookId = Uuids.newId();
         bookMapper.insert(sampleBook(bookId));
 
         bookMapper.delete(bookId);
