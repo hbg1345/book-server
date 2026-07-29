@@ -2,6 +2,7 @@
 DROP TABLE IF EXISTS book_author;
 DROP TABLE IF EXISTS book;
 DROP TABLE IF EXISTS author;
+DROP TABLE IF EXISTS book_user;
 
 -- Books
 CREATE TABLE book (
@@ -27,4 +28,15 @@ CREATE TABLE book_author (
     PRIMARY KEY (book_uuid, author_uuid),
     FOREIGN KEY (book_uuid)   REFERENCES book (book_uuid)     ON DELETE CASCADE,
     FOREIGN KEY (author_uuid) REFERENCES author (author_uuid) ON DELETE CASCADE
+);
+
+-- Users
+CREATE TABLE book_user (
+    user_uuid     UUID         PRIMARY KEY,
+    user_id       VARCHAR(100) NOT NULL UNIQUE,
+    user_password VARCHAR(255) NOT NULL,   -- stores a password hash (bcrypt/argon2), not plaintext
+    user_name     VARCHAR(100) NOT NULL,
+    phone         VARCHAR(20)  NOT NULL,
+    birth_date    DATE         NOT NULL,
+    created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
