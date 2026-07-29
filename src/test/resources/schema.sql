@@ -1,4 +1,5 @@
 -- Drop first (reverse order because of foreign keys)
+DROP TABLE IF EXISTS purchase_history;
 DROP TABLE IF EXISTS cart_item;
 DROP TABLE IF EXISTS book_author;
 DROP TABLE IF EXISTS book;
@@ -51,4 +52,18 @@ CREATE TABLE cart_item (
     PRIMARY KEY (user_uuid, book_uuid),
     FOREIGN KEY (user_uuid) REFERENCES book_user (user_uuid) ON DELETE CASCADE,
     FOREIGN KEY (book_uuid) REFERENCES book (book_uuid)      ON DELETE CASCADE
+);
+
+-- Order-level state history (append-only): one row per state change of a purchase.
+-- The current state of a purchase is its most recent row (latest updated_at).
+CREATE TABLE purchase_history (
+    history_uuid   UUID          PRIMARY KEY,
+    purchase_uuid  UUID          NOT NULL,   -- stable id of the purchase (repeats across rows)
+    user_uuid      UUID          NOT NULL,
+    purchase_state VARCHAR(20)   NOT NULL
+        CHECK (purchase_state IN ('PAYMENT_PENDING','ORDERED','PREPARING','SHIPPING','DELIVERED','CONFIRMED',
+                                  'CANCEL_REQUESTED','CANCELLED','REFUND_REQUESTED','REFUNDED')),
+    price          DECIMAL(10,2) NOT NULL,   -- order total snapshot
+    updated_at     TIMESTAMP     NOT NULL,   -- the moment this state took effect (set by the app)
+    FOREIGN KEY (user_uuid) REFERENCES book_user (user_uuid) ON DELETE CASCADE
 );
