@@ -31,11 +31,14 @@ public class UserMapperTest {
         return user;
     }
 
+    // Verifies: findById returns null when no user with that id exists.
     @Test
     void findById_returnsNull_whenNotExists() {
         assertThat(userMapper.findById(UUID.randomUUID())).isNull();
     }
 
+    // Verifies: an inserted user round-trips every field, and created_at is
+    // auto-filled by the DB default (not set by the app).
     @Test
     void insert_and_findById() {
         UUID userUuid = UUID.randomUUID();
@@ -52,6 +55,8 @@ public class UserMapperTest {
         assertThat(found.getCreatedAt()).isNotNull();   // filled by the DB default
     }
 
+    // Verifies: update changes every updatable field (password/name/phone/
+    // birth_date) while user_id and created_at stay untouched.
     @Test
     void update() {
         UUID userUuid = UUID.randomUUID();
@@ -72,6 +77,7 @@ public class UserMapperTest {
         assertThat(found.getBirthDate()).isEqualTo(LocalDate.of(1985, 1, 1));
     }
 
+    // Verifies: delete removes the user so it can no longer be found.
     @Test
     void delete() {
         UUID userUuid = UUID.randomUUID();
