@@ -1,4 +1,5 @@
 -- Drop first (reverse order because of foreign keys)
+DROP TABLE IF EXISTS cart_item;
 DROP TABLE IF EXISTS book_author;
 DROP TABLE IF EXISTS book;
 DROP TABLE IF EXISTS author;
@@ -39,4 +40,15 @@ CREATE TABLE book_user (
     phone         VARCHAR(20)  NOT NULL,
     birth_date    DATE         NOT NULL,
     created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Cart items: one row per (user, book); quantity tracks how many of that book
+CREATE TABLE cart_item (
+    user_uuid  UUID      NOT NULL,
+    book_uuid  UUID      NOT NULL,
+    quantity   INT       NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_uuid, book_uuid),
+    FOREIGN KEY (user_uuid) REFERENCES book_user (user_uuid) ON DELETE CASCADE,
+    FOREIGN KEY (book_uuid) REFERENCES book (book_uuid)      ON DELETE CASCADE
 );
