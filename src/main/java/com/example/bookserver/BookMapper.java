@@ -3,6 +3,7 @@ package com.example.bookserver;
 import java.util.List;
 import java.util.UUID;
 
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Many;
 import org.apache.ibatis.annotations.Mapper;
@@ -10,6 +11,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface BookMapper {
@@ -28,6 +30,11 @@ public interface BookMapper {
             """)
     void linkAuthor(@Param("bookUuid") UUID bookUuid, @Param("authorUuid") UUID authorUuid);
 
+    // book body only — authors left null (not fetched)
+    @Select("SELECT * FROM book WHERE book_uuid = #{bookUuid}")
+    Book findById(UUID bookUuid);
+
+    // book plus its authors, assembled via the nested @Many query
     @Select("SELECT * FROM book WHERE book_uuid = #{bookUuid}")
     @Results(id = "bookResult", value = {
             @Result(property = "bookUuid", column = "book_uuid", id = true),
@@ -40,7 +47,7 @@ public interface BookMapper {
             @Result(property = "authors", column = "book_uuid",
                     many = @Many(select = "findAuthorsByBookId"))
     })
-    Book findById(UUID bookUuid);
+    Book findByIdWithAuthors(UUID bookUuid);
 
     @Select("""
             SELECT a.author_uuid, a.author_name
@@ -53,4 +60,19 @@ public interface BookMapper {
             @Result(property = "authorName", column = "author_name")
     })
     List<Author> findAuthorsByBookId(UUID bookUuid);
+
+    @Update("""
+            UPDATE book SET
+                book_title = #{bookTitle},
+                book_description = #{bookDescription},
+                price = #{price},
+                publish_date = #{publishDate},
+                publisher = #{publisher},
+                inventory = #{inventory}
+            WHERE book_uuid = #{bookUuid}
+            """)
+    void update(Book book);
+
+    @Delete("DELETE FROM book WHERE book_uuid = #{bookUuid}")
+    void delete(UUID bookUuid);
 }
