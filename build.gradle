@@ -25,6 +25,7 @@ ext {
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'   // jakarta bean validation (@Valid)
     implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.0.1'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
@@ -68,5 +69,6 @@ tasks.register('benchmark', Test) {
 
 tasks.named('asciidoctor') {
     inputs.dir snippetsDir
+    attributes 'snippets': snippetsDir   // lets index.adoc reference {snippets}/...
     dependsOn test
 }
