@@ -6,12 +6,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import com.example.bookserver.TestcontainersConfiguration;
+import com.jayway.jsonpath.JsonPath;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -19,11 +19,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Smoke test for the whole stack: real controller -> real {@link UserService} -> real
- * mapper -> real PostgreSQL (Testcontainers). Deliberately minimal — it only proves the
- * layers are wired together and real login works end-to-end (BCrypt hash stored on
- * register actually verifies on login). The exhaustive per-case checks live in the fast
- * {@code UserControllerWebMvcTest} slice.
+ * Smoke test for the whole stack under JWT security: register -> login (get tokens) ->
+ * call a protected endpoint with the access token, all against the real DB. Proves the
+ * BCrypt hash stored on register verifies on login and the JWT filter authenticates.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -39,32 +37,42 @@ class UserControllerIntegrationTest {
              "phone":"010-1234-5678","birthDate":"1990-05-20"}
             """;
 
-    // register -> login -> read own profile, all against the real DB and a real session.
+    private static final String LOGIN_BODY = """
+            {"userId":"jdoe","password":"secret"}
+            """;
+
+    // register -> login -> read own profile with the access token, end to end.
     @Test
     void register_login_me_roundTrip() throws Exception {
         mockMvc.perform(post("/api/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(REGISTER_BODY))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.userUuid").isNotEmpty());
+                .andExpect(status().isCreated());
 
         MvcResult login = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"userId":"jdoe","password":"secret"}
-                                """))
+                        .content(LOGIN_BODY))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").isNotEmpty())
                 .andReturn();
-        MockHttpSession session = (MockHttpSession) login.getRequest().getSession(false);
+        String accessToken = JsonPath.read(login.getResponse().getContentAsString(), "$.accessToken");
 
-        mockMvc.perform(get("/api/users/me").session(session))
+        mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userId").value("jdoe"))
                 .andExpect(jsonPath("$.userName").value("Jane Doe"))
                 .andExpect(jsonPath("$.userPassword").doesNotExist());  // hash never leaks
     }
 
-    // Wrong password against the real stored BCrypt hash -> 401 (the check Mocks can't prove).
+    // /me without a token -> 401 (the security entry point).
+    @Test
+    void me_returns401_withoutToken() throws Exception {
+        mockMvc.perform(get("/api/users/me"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // Wrong password against the real stored BCrypt hash -> 401 (the check mocks can't prove).
     @Test
     void login_returns401_whenWrongPassword() throws Exception {
         mockMvc.perform(post("/api/users")

@@ -11,6 +11,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.example.bookserver.auth.JwtProvider;
+import com.example.bookserver.auth.SecurityConfig;
 import com.example.bookserver.common.GlobalExceptionHandler;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -36,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @WebMvcTest(AuthorController.class)
 @AutoConfigureRestDocs
-@org.springframework.context.annotation.Import(GlobalExceptionHandler.class)
+@org.springframework.context.annotation.Import({GlobalExceptionHandler.class, SecurityConfig.class, JwtProvider.class})
 class AuthorControllerWebMvcTest {
 
     @Autowired
