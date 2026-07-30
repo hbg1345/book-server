@@ -1,4 +1,4 @@
-package com.example.bookserver;
+package com.example.bookserver.purchase;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
