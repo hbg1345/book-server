@@ -1,6 +1,7 @@
 package com.example.bookserver.user;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -8,9 +9,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.restdocs.test.autoconfigure.AutoConfigureRestDocs;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.example.bookserver.auth.JwtProvider;
+import com.example.bookserver.auth.SecurityConfig;
 import com.example.bookserver.common.GlobalExceptionHandler;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -23,22 +27,23 @@ import static org.springframework.restdocs.mockmvc.MockMvcRestDocumentation.docu
 import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath;
 import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Controller-slice test: only the web layer is loaded and {@link UserService} is a mock.
- * Verifies HTTP wiring (routing, JSON (de)serialization, status codes, session use) — the
- * DB behaviour is already covered by {@link UserServiceTest}, so it is not re-tested here.
+ * Controller-slice test for the user endpoints under the real security filter chain.
+ * Registration is public; the {@code /me} endpoints require an authenticated principal
+ * (the user's uuid, as the JWT filter would set it).
  */
 @WebMvcTest(UserController.class)
 @AutoConfigureRestDocs
-@org.springframework.context.annotation.Import(GlobalExceptionHandler.class)
+@org.springframework.context.annotation.Import({GlobalExceptionHandler.class, SecurityConfig.class, JwtProvider.class})
 class UserControllerWebMvcTest {
 
     @Autowired
@@ -46,6 +51,11 @@ class UserControllerWebMvcTest {
 
     @MockitoBean
     private UserService userService;
+
+    /** Request post-processor: authenticate as the given user uuid (what the JWT filter does). */
+    private static org.springframework.test.web.servlet.request.RequestPostProcessor asUser(UUID uuid) {
+        return authentication(new UsernamePasswordAuthenticationToken(uuid, null, List.of()));
+    }
 
     // register: 201 + generated uuid; service receives the parsed fields
     @Test
@@ -91,8 +101,7 @@ class UserControllerWebMvcTest {
                 .andExpect(status().isConflict());
     }
 
-    // invalid body (blank id, malformed phone) -> 400 problem+json with a per-field
-    // "errors" map, and the service is never reached
+    // invalid body -> 400 problem+json with per-field errors; service never reached
     @Test
     void register_returns400WithFieldErrors_whenInvalid() throws Exception {
         mockMvc.perform(post("/api/users")
@@ -109,49 +118,14 @@ class UserControllerWebMvcTest {
         verify(userService, never()).register(any(), any(), any(), any(), any());
     }
 
-    // login: stores the uuid in the session
+    // /me without authentication -> 401
     @Test
-    void login_setsSession() throws Exception {
-        UUID uuid = UUID.randomUUID();
-        when(userService.login("jdoe", "secret")).thenReturn(uuid);
-
-        mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"userId":"jdoe","password":"secret"}
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(request -> {
-                    Object sessionUuid = request.getRequest().getSession().getAttribute("userUuid");
-                    org.assertj.core.api.Assertions.assertThat(sessionUuid).isEqualTo(uuid);
-                })
-                .andDo(document("user-login",
-                        requestFields(
-                                fieldWithPath("userId").description("Login id"),
-                                fieldWithPath("password").description("Password"))));
-    }
-
-    // login with bad credentials -> 401
-    @Test
-    void login_returns401_whenBadCredentials() throws Exception {
-        when(userService.login(any(), any())).thenThrow(new InvalidCredentialsException());
-
-        mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"userId":"jdoe","password":"wrong"}
-                                """))
-                .andExpect(status().isUnauthorized());
-    }
-
-    // /me without a session -> 401
-    @Test
-    void me_returns401_whenNotLoggedIn() throws Exception {
+    void me_returns401_whenNotAuthenticated() throws Exception {
         mockMvc.perform(get("/api/users/me"))
                 .andExpect(status().isUnauthorized());
     }
 
-    // /me with a session -> 200 and the profile JSON never carries the password
+    // /me authenticated -> 200 and the profile JSON never carries the password
     @Test
     void me_returnsProfileWithoutPassword() throws Exception {
         UUID uuid = UUID.randomUUID();
@@ -160,7 +134,7 @@ class UserControllerWebMvcTest {
                 java.time.LocalDateTime.of(2026, 7, 30, 10, 0));
         when(userService.getProfile(uuid)).thenReturn(user);
 
-        mockMvc.perform(get("/api/users/me").sessionAttr("userUuid", uuid))
+        mockMvc.perform(get("/api/users/me").with(asUser(uuid)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userId").value("jdoe"))
                 .andExpect(jsonPath("$.userName").value("Jane Doe"))
@@ -183,8 +157,7 @@ class UserControllerWebMvcTest {
         doThrow(new InvalidPasswordException())
                 .when(userService).changePassword(eq(uuid), eq("wrong"), eq("newsecret"));
 
-        mockMvc.perform(put("/api/users/me/password")
-                        .sessionAttr("userUuid", uuid)
+        mockMvc.perform(put("/api/users/me/password").with(asUser(uuid))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"currentPassword":"wrong","newPassword":"newsecret"}
@@ -192,12 +165,12 @@ class UserControllerWebMvcTest {
                 .andExpect(status().isBadRequest());
     }
 
-    // withdraw: delegates to the service with the session user
+    // withdraw: delegates to the service with the authenticated user
     @Test
     void withdraw_delegatesToService() throws Exception {
         UUID uuid = UUID.randomUUID();
 
-        mockMvc.perform(delete("/api/users/me").sessionAttr("userUuid", uuid))
+        mockMvc.perform(delete("/api/users/me").with(asUser(uuid)))
                 .andExpect(status().isOk());
 
         verify(userService).withdraw(uuid);
