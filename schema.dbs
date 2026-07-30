@@ -52,7 +52,9 @@
 			<column name="user_name" type="NVARCHAR" length="100" mandatory="y" />
 			<column name="user_password" prior="user_id" type="VARCHAR" length="100" mandatory="y" />
 			<column name="user_id" type="VARCHAR" mandatory="y" />
-			<column name="created_at" type="DATETIME" length="9999999" />
+			<column name="created_at" type="DATETIME" length="9999999" mandatory="y" />
+			<column name="birth_date" type="DATE" mandatory="y" />
+			<column name="phone" type="VARCHAR" mandatory="y" />
 			<index name="pk_book_user" unique="PRIMARY_KEY" >
 				<column name="user_uuid" />
 			</index>
@@ -67,10 +69,10 @@
 				<column name="user_uuid" />
 				<column name="book_uuid" />
 			</index>
-			<fk name="fk_cart_item_book" to_schema="Schema_" to_table="book" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
+			<fk name="fk_cart_item_book" to_schema="Schema_" to_table="book" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
 				<fk_column name="book_uuid" pk="book_uuid" />
 			</fk>
-			<fk name="fk_cart_item_book_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
+			<fk name="fk_cart_item_book_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
 				<fk_column name="user_uuid" pk="user_uuid" />
 			</fk>
 		</table>
@@ -85,24 +87,24 @@
 				<column name="history_uuid" />
 				<column name="book_uuid" />
 			</index>
-			<fk name="fk_purchase_book_book" to_schema="Schema_" to_table="purchase_history" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
-				<fk_column name="history_uuid" pk="hisotry_uuid" />
+			<fk name="fk_purchase_book_book" to_schema="Schema_" to_table="purchase_history" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
+				<fk_column name="history_uuid" pk="history_uuid" />
 			</fk>
 			<fk name="fk_purchase_book_history_book" to_schema="Schema_" to_table="book" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
 				<fk_column name="book_uuid" pk="book_uuid" />
 			</fk>
 		</table>
 		<table name="purchase_history" prior="purchase" >
-			<column name="hisotry_uuid" prior="hisotry_id" type="UUID" mandatory="y" />
+			<column name="history_uuid" prior="hisotry_uuid" type="UUID" mandatory="y" />
 			<column name="purchase_uuid" prior="purcase_uuid" type="UUID" mandatory="y" />
 			<column name="user_uuid" type="UUID" mandatory="y" />
 			<column name="purchase_state" prior="state" type="ENUM" mandatory="y" />
 			<column name="updated_at" prior="order_datetime" type="DATETIME" mandatory="y" />
 			<column name="price" type="DECIMAL" length="9999999" mandatory="y" />
 			<index name="pk_purchase" unique="PRIMARY_KEY" >
-				<column name="hisotry_uuid" />
+				<column name="history_uuid" />
 			</index>
-			<fk name="fk_purchase_book_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
+			<fk name="fk_purchase_book_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
 				<fk_column name="user_uuid" pk="user_uuid" />
 			</fk>
 		</table>

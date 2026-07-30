@@ -1,4 +1,5 @@
 -- Drop first (reverse order because of foreign keys)
+DROP TABLE IF EXISTS purchase_current;
 DROP TABLE IF EXISTS purchase_history;
 DROP TABLE IF EXISTS cart_item;
 DROP TABLE IF EXISTS book_author;
@@ -55,7 +56,7 @@ CREATE TABLE cart_item (
 );
 
 -- Order-level state history (append-only): one row per state change of a purchase.
--- The current state of a purchase is its most recent row (latest updated_at).
+-- This is now purely the audit log; the "current state" lives in purchase_current.
 CREATE TABLE purchase_history (
     history_uuid   UUID          PRIMARY KEY,
     purchase_uuid  UUID          NOT NULL,   -- stable id of the purchase (repeats across rows)
@@ -67,3 +68,23 @@ CREATE TABLE purchase_history (
     updated_at     TIMESTAMP     NOT NULL,   -- the moment this state took effect (set by the app)
     FOREIGN KEY (user_uuid) REFERENCES book_user (user_uuid) ON DELETE CASCADE
 );
+
+-- Order-level CURRENT state: exactly one row per purchase (PK = purchase_uuid),
+-- upserted on every state change. Reading a user's latest order states is then a
+-- plain indexed range scan on user_uuid — no ORDER BY + DISTINCT over the log.
+CREATE TABLE purchase_current (
+    purchase_uuid  UUID          PRIMARY KEY,
+    user_uuid      UUID          NOT NULL,
+    history_uuid   UUID          NOT NULL,   -- head pointer: the history event that IS the current state
+    purchase_state VARCHAR(20)   NOT NULL
+        CHECK (purchase_state IN ('PAYMENT_PENDING','ORDERED','PREPARING','SHIPPING','DELIVERED','CONFIRMED',
+                                  'CANCEL_REQUESTED','CANCELLED','REFUND_REQUESTED','REFUNDED')),
+    price          DECIMAL(10,2) NOT NULL,   -- order total snapshot (latest)
+    updated_at     TIMESTAMP     NOT NULL,   -- the moment the current state took effect
+    FOREIGN KEY (user_uuid)    REFERENCES book_user (user_uuid)           ON DELETE CASCADE,
+    -- the current state must be a real logged event; deleting the log cleans up current
+    FOREIGN KEY (history_uuid) REFERENCES purchase_history (history_uuid) ON DELETE CASCADE
+);
+
+-- The hot path: "give me the current state of all of this user's purchases".
+CREATE INDEX idx_purchase_current_user ON purchase_current (user_uuid);
