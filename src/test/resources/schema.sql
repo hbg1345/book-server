@@ -1,4 +1,5 @@
 -- Drop first (reverse order because of foreign keys)
+DROP TABLE IF EXISTS refresh_token;
 DROP TABLE IF EXISTS purchase_book_history;
 DROP TABLE IF EXISTS purchase_current;
 DROP TABLE IF EXISTS purchase_history;
@@ -44,6 +45,24 @@ CREATE TABLE book_user (
     birth_date    DATE         NOT NULL,
     created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Refresh tokens: one row per issued refresh token. Rotation keeps the old row
+-- (marked used) so a replayed/stolen token can be detected. The opaque random
+-- token itself is never stored — only its SHA-256 hash.
+CREATE TABLE refresh_token (
+    token_id   UUID        PRIMARY KEY,
+    family_id  UUID        NOT NULL,               -- all rotations of one login share this
+    user_uuid  UUID        NOT NULL,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,        -- SHA-256 hex of the opaque token
+    used       BOOLEAN     NOT NULL DEFAULT FALSE, -- rotated away; reuse if presented again
+    revoked    BOOLEAN     NOT NULL DEFAULT FALSE, -- family killed (reuse detected / logout)
+    expires_at TIMESTAMP   NOT NULL,
+    created_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_uuid) REFERENCES book_user (user_uuid) ON DELETE CASCADE
+);
+
+-- Revoking a whole family (on reuse detection or logout) scans by family_id.
+CREATE INDEX idx_refresh_token_family ON refresh_token (family_id);
 
 -- Cart items: one row per (user, book); quantity tracks how many of that book
 CREATE TABLE cart_item (
