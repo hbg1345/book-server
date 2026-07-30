@@ -1,4 +1,5 @@
 -- Drop first (reverse order because of foreign keys)
+DROP TABLE IF EXISTS purchase_book_history;
 DROP TABLE IF EXISTS purchase_current;
 DROP TABLE IF EXISTS purchase_history;
 DROP TABLE IF EXISTS cart_item;
@@ -88,3 +89,22 @@ CREATE TABLE purchase_current (
 
 -- The hot path: "give me the current state of all of this user's purchases".
 CREATE INDEX idx_purchase_current_user ON purchase_current (user_uuid);
+
+-- Per-book state history (append-only): for each order state-change event
+-- (purchase_history.history_uuid), one row per book capturing that book's
+-- state/quantity/price at that event. Looked up by history_uuid, which is the
+-- leftmost prefix of the PK — so, unlike the order-level state, it is already
+-- served by an index and needs no current/history split.
+CREATE TABLE purchase_book_history (
+    history_uuid   UUID          NOT NULL,   -- the purchase_history state event this row belongs to
+    book_uuid      UUID          NOT NULL,
+    purchase_state VARCHAR(20)   NOT NULL
+        CHECK (purchase_state IN ('PAYMENT_PENDING','ORDERED','PREPARING','SHIPPING','DELIVERED','CONFIRMED',
+                                  'CANCEL_REQUESTED','CANCELLED','REFUND_REQUESTED','REFUNDED')),
+    quantity       INT           NOT NULL,
+    price          DECIMAL(10,2) NOT NULL,   -- per-book price snapshot at that event
+    updated_at     TIMESTAMP     NOT NULL,
+    PRIMARY KEY (history_uuid, book_uuid),
+    FOREIGN KEY (history_uuid) REFERENCES purchase_history (history_uuid) ON DELETE CASCADE,
+    FOREIGN KEY (book_uuid)    REFERENCES book (book_uuid)
+);
