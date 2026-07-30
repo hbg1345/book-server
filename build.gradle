@@ -39,10 +39,14 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
     implementation 'com.github.f4b6a3:uuid-creator:6.0.0'   // UUIDv7 (time-ordered) id generation
-    implementation 'org.springframework.security:spring-security-crypto'   // BCrypt password hashing (crypto only, no full Security yet)
+    implementation 'org.springframework.boot:spring-boot-starter-security'   // authn/authz filter chain
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'                          // JWT (access token)
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
     testCompileOnly 'org.projectlombok:lombok'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testAnnotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.security:spring-security-test'   // @WithMockUser etc.
 }
 
 tasks.named('test') {
