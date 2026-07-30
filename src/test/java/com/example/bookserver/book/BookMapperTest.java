@@ -99,6 +99,44 @@ public class BookMapperTest {
                 .containsExactlyInAnyOrder("Robert Martin", "John Doe");
     }
 
+    // 3b. findAll — empty table, then all inserted book bodies
+    // Verifies: findAll returns nothing on an empty table and every inserted
+    // book afterwards (authors not fetched by the list query).
+    @Test
+    void findAll_returnsAllBooks() {
+        assertThat(bookMapper.findAll()).isEmpty();
+
+        UUID id1 = Uuids.newId();
+        UUID id2 = Uuids.newId();
+        bookMapper.insert(sampleBook(id1));
+        bookMapper.insert(sampleBook(id2));
+
+        assertThat(bookMapper.findAll())
+                .extracting(Book::getBookUuid)
+                .containsExactlyInAnyOrder(id1, id2);
+    }
+
+    // 3c. unlinkAuthors — removes the join rows only
+    // Verifies: unlinkAuthors drops every author link for the book while leaving
+    // the book itself (and the author rows) intact.
+    @Test
+    void unlinkAuthors_removesLinksOnly() {
+        UUID bookId = Uuids.newId();
+        Author a1 = new Author(Uuids.newId(), "Robert Martin");
+        Author a2 = new Author(Uuids.newId(), "John Doe");
+        authorMapper.insert(a1);
+        authorMapper.insert(a2);
+        bookMapper.insert(sampleBook(bookId));
+        bookMapper.linkAuthor(bookId, a1.getAuthorUuid());
+        bookMapper.linkAuthor(bookId, a2.getAuthorUuid());
+
+        bookMapper.unlinkAuthors(bookId);
+
+        assertThat(bookMapper.findAuthorsByBookId(bookId)).isEmpty();
+        assertThat(bookMapper.findById(bookId)).isNotNull();             // book kept
+        assertThat(authorMapper.findById(a1.getAuthorUuid())).isNotNull(); // author kept
+    }
+
     // 4. update
     // Verifies: update writes every mutable column correctly — each field is
     // changed to a distinct value so a broken SET mapping cannot slip through.

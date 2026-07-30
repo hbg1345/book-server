@@ -34,6 +34,11 @@ public interface BookMapper {
     @Select("SELECT * FROM book WHERE book_uuid = #{bookUuid}")
     Book findById(UUID bookUuid);
 
+    // list view: book bodies only (authors not fetched to avoid N+1), newest first.
+    // book_uuid is UUIDv7 (time-ordered), so DESC ≈ most-recently-created first.
+    @Select("SELECT * FROM book ORDER BY book_uuid DESC")
+    List<Book> findAll();
+
     // book plus its authors, assembled via the nested @Many query
     @Select("SELECT * FROM book WHERE book_uuid = #{bookUuid}")
     @Results(id = "bookResult", value = {
@@ -72,6 +77,10 @@ public interface BookMapper {
             WHERE book_uuid = #{bookUuid}
             """)
     void update(Book book);
+
+    // remove all author links for a book (used to re-link on update)
+    @Delete("DELETE FROM book_author WHERE book_uuid = #{bookUuid}")
+    void unlinkAuthors(UUID bookUuid);
 
     @Delete("DELETE FROM book WHERE book_uuid = #{bookUuid}")
     void delete(UUID bookUuid);

@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import com.example.bookserver.book.BookNotFoundException;
 import com.example.bookserver.user.DuplicateUserIdException;
 import com.example.bookserver.user.InvalidCredentialsException;
 import com.example.bookserver.user.InvalidPasswordException;
@@ -36,6 +37,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     /** Operating on a user_uuid that no longer exists. */
     @ExceptionHandler(UserNotFoundException.class)
     public ProblemDetail handleUserNotFound(UserNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Operating on a book_uuid that does not exist. */
+    @ExceptionHandler(BookNotFoundException.class)
+    public ProblemDetail handleBookNotFound(BookNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
