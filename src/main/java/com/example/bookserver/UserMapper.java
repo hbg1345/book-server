@@ -23,6 +23,10 @@ public interface UserMapper {
     @Select("SELECT * FROM book_user WHERE user_uuid = #{userUuid}")
     User findById(UUID userUuid);
 
+    // login id lookup — used for duplicate-id checks (and later, authentication)
+    @Select("SELECT * FROM book_user WHERE user_id = #{userId}")
+    User findByUserId(String userId);
+
     // user_id (login id) and created_at are immutable
     @Update("""
             UPDATE book_user SET
