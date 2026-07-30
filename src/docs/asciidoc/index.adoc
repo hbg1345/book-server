@@ -1,0 +1,62 @@
+= Book Server API
+:doctype: book
+:icons: font
+:source-highlighter: highlightjs
+:toc: left
+:toclevels: 2
+:sectnums:
+
+Session-based user API. Log in via `POST /api/auth/login`; the session cookie then
+identifies the current user on the `+/api/users/me+` endpoints.
+
+== User
+
+=== Register
+
+Creates a new user. The raw password is sent in plaintext over the request and stored
+hashed (never in plaintext). Returns the generated `userUuid`.
+
+`POST /api/users`
+
+.Request
+include::{snippets}/user-register/http-request.adoc[]
+
+.Request fields
+include::{snippets}/user-register/request-fields.adoc[]
+
+.Response
+include::{snippets}/user-register/http-response.adoc[]
+
+.Response fields
+include::{snippets}/user-register/response-fields.adoc[]
+
+=== Login
+
+Authenticates a login id and password. On success the user's uuid is stored in the
+HTTP session; there is no response body.
+
+`POST /api/auth/login`
+
+.Request
+include::{snippets}/user-login/http-request.adoc[]
+
+.Request fields
+include::{snippets}/user-login/request-fields.adoc[]
+
+.Response
+include::{snippets}/user-login/http-response.adoc[]
+
+=== Get my profile
+
+Returns the logged-in user's profile. The password hash is never included.
+
+`GET /api/users/me`
+
+.Request
+include::{snippets}/user-me/http-request.adoc[]
+
+.Response
+include::{snippets}/user-me/http-response.adoc[]
+
+.Response fields
+include::{snippets}/user-me/response-fields.adoc[]
