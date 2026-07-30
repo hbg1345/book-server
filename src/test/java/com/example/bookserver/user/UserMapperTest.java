@@ -58,6 +58,20 @@ public class UserMapperTest {
         assertThat(found.getCreatedAt()).isNotNull();   // filled by the DB default
     }
 
+    // Verifies: findByUserId looks a user up by login id, and returns null when
+    // no user has that id.
+    @Test
+    void findByUserId_returnsUser_orNullWhenAbsent() {
+        UUID userUuid = Uuids.newId();
+        userMapper.insert(sampleUser(userUuid));
+
+        User found = userMapper.findByUserId("jdoe");
+        assertThat(found).isNotNull();
+        assertThat(found.getUserUuid()).isEqualTo(userUuid);
+
+        assertThat(userMapper.findByUserId("nobody")).isNull();
+    }
+
     // Verifies: update changes every updatable field (password/name/phone/
     // birth_date) while user_id and created_at stay untouched.
     @Test
