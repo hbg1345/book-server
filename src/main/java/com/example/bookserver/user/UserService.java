@@ -46,6 +46,21 @@ public class UserService {
         return userMapper.findByUserId(userId) != null;
     }
 
+    /**
+     * Authenticate a login id + raw password and return the user_uuid.
+     * Uses one generic failure for both "no such id" and "wrong password" so the
+     * response never reveals whether the id exists.
+     *
+     * @throws InvalidCredentialsException if the id is unknown or the password is wrong
+     */
+    public UUID login(String userId, String rawPassword) {
+        User user = userMapper.findByUserId(userId);
+        if (user == null || !passwordEncoder.matches(rawPassword, user.getUserPassword())) {
+            throw new InvalidCredentialsException();
+        }
+        return user.getUserUuid();
+    }
+
     /** The user's profile. Note: the returned User still carries the password hash;
      *  the controller must not serialize it. */
     public User getProfile(UUID userUuid) {
