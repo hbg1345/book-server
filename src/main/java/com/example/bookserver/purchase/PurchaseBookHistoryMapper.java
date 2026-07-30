@@ -1,4 +1,4 @@
-package com.example.bookserver;
+package com.example.bookserver.purchase;
 
 import java.util.List;
 import java.util.UUID;

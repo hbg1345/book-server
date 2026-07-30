@@ -1,4 +1,4 @@
-package com.example.bookserver;
+package com.example.bookserver.purchase;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -10,6 +10,13 @@ import org.mybatis.spring.boot.test.autoconfigure.MybatisTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.jdbc.Sql;
+
+import com.example.bookserver.TestcontainersConfiguration;
+import com.example.bookserver.book.Book;
+import com.example.bookserver.book.BookMapper;
+import com.example.bookserver.common.Uuids;
+import com.example.bookserver.user.User;
+import com.example.bookserver.user.UserMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

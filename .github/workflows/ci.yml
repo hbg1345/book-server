@@ -7,6 +7,17 @@ on:
   pull_request:
     branches: [ master ]
 
+# Permissions the Pages deploy needs (read is enough for the build itself)
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-latest   # GitHub-hosted runner (Docker is preinstalled)
@@ -23,6 +34,29 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 3. Run the tests (Testcontainers spins up PostgreSQL via the runner's Docker)
-      - name: Run tests
-        run: bash ./gradlew test
+      # 3. Run the full test suite AND assemble the REST Docs site in ONE run.
+      #    asciidoctor dependsOn test, so the snippets the tests emit are reused —
+      #    the suite runs once, not a second time just for docs.
+      #    (Testcontainers spins up PostgreSQL via the runner's Docker.)
+      - name: Run tests and build API docs
+        run: bash ./gradlew asciidoctor
+
+      # 4. Package the generated docs for Pages — only on push to master (skip on PRs)
+      - name: Upload Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/docs/asciidoc
+
+  # Deploy the docs to GitHub Pages — only on push to master
+  deploy-docs:
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
