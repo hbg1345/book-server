@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import com.example.bookserver.auth.InvalidRefreshTokenException;
 import com.example.bookserver.book.BookNotFoundException;
 import com.example.bookserver.user.DuplicateUserIdException;
 import com.example.bookserver.user.InvalidCredentialsException;
@@ -58,9 +59,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
     }
 
-    /** A protected endpoint hit without a logged-in session. */
-    @ExceptionHandler(NotLoggedInException.class)
-    public ProblemDetail handleNotLoggedIn(NotLoggedInException ex) {
+    /** Invalid, expired, revoked, or replayed refresh token. */
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    public ProblemDetail handleInvalidRefreshToken(InvalidRefreshTokenException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
     }
 
