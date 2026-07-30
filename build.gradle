@@ -38,6 +38,7 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
     implementation 'com.github.f4b6a3:uuid-creator:6.0.0'   // UUIDv7 (time-ordered) id generation
+    implementation 'org.springframework.security:spring-security-crypto'   // BCrypt password hashing (crypto only, no full Security yet)
     testCompileOnly 'org.projectlombok:lombok'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testAnnotationProcessor 'org.projectlombok:lombok'
