@@ -131,6 +131,28 @@
 				<fk_column name="purchase_uuid" pk="purchase_uuid" />
 			</fk>
 		</table>
+		<table name="refresh_token" prior="tbl" >
+			<column name="token_id" type="UUID" mandatory="y" />
+			<column name="family_id" type="UUID" mandatory="y" />
+			<column name="user_uuid" type="UUID" mandatory="y" />
+			<column name="token_hash" type="VARCHAR" length="64" mandatory="y" />
+			<column name="used" type="BOOLEAN" mandatory="y" />
+			<column name="revoked" type="BOOLEAN" mandatory="y" />
+			<column name="expires_at" type="DATETIME" mandatory="y" />
+			<column name="created_at" type="DATETIME" mandatory="y" />
+			<index name="pk_refresh_token" unique="PRIMARY_KEY" >
+				<column name="token_id" />
+			</index>
+			<index name="unq_refresh_token_hash" unique="UNIQUE_KEY" >
+				<column name="token_hash" />
+			</index>
+			<index name="idx_refresh_token_family" unique="NORMAL" >
+				<column name="family_id" />
+			</index>
+			<fk name="fk_refresh_token_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
+				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+		</table>
 	</schema>
 	<diagram_group name="Default" id="cbcc5be2-a937-48fd-9091-231b53f9a039" >
 		<diagram name="Default Diagram" id="68c731c4-2254-4bfa-87d7-dc7653a67353" show_relation="columns" >
@@ -142,6 +164,7 @@
 			<entity schema="Schema_" name="purchase_book_history" color="C1D8EE" x="741" y="323" />
 			<entity schema="Schema_" name="purchase_current" color="3986C1" x="152" y="323" />
 			<entity schema="Schema_" name="purchase_history" color="C1D8EE" x="437" y="323" />
+			<entity schema="Schema_" name="refresh_token" color="C1D8EE" x="57" y="589" />
 		</diagram>
 	</diagram_group>
 </project>
