@@ -94,6 +94,26 @@
 				<fk_column name="book_uuid" pk="book_uuid" />
 			</fk>
 		</table>
+		<table name="purchase_current" prior="purchase_history_0" >
+			<column name="history_uuid" prior="hisotry_uuid" type="UUID" mandatory="y" />
+			<column name="purchase_uuid" prior="purcase_uuid" type="UUID" mandatory="y" />
+			<column name="user_uuid" type="UUID" mandatory="y" />
+			<column name="purchase_state" prior="state" type="ENUM" mandatory="y" />
+			<column name="updated_at" prior="order_datetime" type="DATETIME" mandatory="y" />
+			<column name="price" type="DECIMAL" length="9999999" mandatory="y" />
+			<index name="pk_purchase_current" unique="PRIMARY_KEY" >
+				<column name="purchase_uuid" />
+			</index>
+			<index name="idx_purchase_current_user" unique="NORMAL" >
+				<column name="user_uuid" />
+			</index>
+			<fk name="fk_purchase_book_user_0" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="n" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
+				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+			<fk name="fk_purchase_current" to_schema="Schema_" to_table="purchase_history" type="NonIdentifying" mandatory="y" cardinality="One" range_from="0" range_to="0" >
+				<fk_column name="history_uuid" pk="history_uuid" />
+			</fk>
+		</table>
 		<table name="purchase_history" prior="purchase" >
 			<column name="history_uuid" prior="hisotry_uuid" type="UUID" mandatory="y" />
 			<column name="purchase_uuid" prior="purcase_uuid" type="UUID" mandatory="y" />
@@ -107,6 +127,9 @@
 			<fk name="fk_purchase_book_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
 				<fk_column name="user_uuid" pk="user_uuid" />
 			</fk>
+			<fk name="fk_purchase_history" to_schema="Schema_" to_table="purchase_current" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
+				<fk_column name="purchase_uuid" pk="purchase_uuid" />
+			</fk>
 		</table>
 	</schema>
 	<diagram_group name="Default" id="cbcc5be2-a937-48fd-9091-231b53f9a039" >
@@ -116,8 +139,9 @@
 			<entity schema="Schema_" name="book_author" color="C1D8EE" x="760" y="57" />
 			<entity schema="Schema_" name="book_user" color="C1D8EE" x="57" y="57" />
 			<entity schema="Schema_" name="cart_item" color="C1D8EE" x="304" y="57" />
-			<entity schema="Schema_" name="purchase_book_history" color="C1D8EE" x="513" y="342" />
-			<entity schema="Schema_" name="purchase_history" color="C1D8EE" x="171" y="342" />
+			<entity schema="Schema_" name="purchase_book_history" color="C1D8EE" x="741" y="323" />
+			<entity schema="Schema_" name="purchase_current" color="3986C1" x="152" y="323" />
+			<entity schema="Schema_" name="purchase_history" color="C1D8EE" x="437" y="323" />
 		</diagram>
 	</diagram_group>
 </project>
