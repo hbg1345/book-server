@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.util.List;
 import java.util.UUID;
 
 @Mapper
@@ -22,6 +23,25 @@ public interface AuthorMapper {
             WHERE author_uuid = #{authorUuid}
             """)
     Author findById(UUID authorUuid);
+
+    // name search — may return several homonyms (author_name is not unique);
+    // callers disambiguate via each author's books (see findBookTitlesByAuthorId)
+    @Select("""
+            SELECT * FROM author
+            WHERE author_name = #{name}
+            ORDER BY author_uuid
+            """)
+    List<Author> findByName(String name);
+
+    // titles of the books this author wrote — used to tell homonyms apart
+    @Select("""
+            SELECT b.book_title
+            FROM book b
+            JOIN book_author ba ON b.book_uuid = ba.book_uuid
+            WHERE ba.author_uuid = #{authorUuid}
+            ORDER BY b.book_uuid DESC
+            """)
+    List<String> findBookTitlesByAuthorId(UUID authorUuid);
 
     @Update("""
             UPDATE author
