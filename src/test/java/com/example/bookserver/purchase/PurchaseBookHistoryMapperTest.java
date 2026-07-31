@@ -124,6 +124,22 @@ public class PurchaseBookHistoryMapperTest {
                 .containsExactlyInAnyOrder(book1, book2);
     }
 
+    // Verifies: findItemsWithBookByHistoryUuid joins each per-book row with its
+    // book title, for the order-detail view (title ordering, quantity + price kept).
+    @Test
+    void findItemsWithBookByHistoryUuid_joinsBookTitle() {
+        UUID userUuid = persistUser();
+        UUID book1 = persistBook("Domain-Driven Design");
+        UUID book2 = persistBook("A Philosophy of Software Design");
+        UUID historyUuid = logOrderEvent(Uuids.newId(), userUuid, PurchaseState.ORDERED, BASE);
+        purchaseBookHistoryMapper.insert(bookRow(historyUuid, book1, PurchaseState.ORDERED, 2, BASE));
+        purchaseBookHistoryMapper.insert(bookRow(historyUuid, book2, PurchaseState.ORDERED, 1, BASE));
+
+        assertThat(purchaseBookHistoryMapper.findItemsWithBookByHistoryUuid(historyUuid))
+                .extracting(OrderBookItem::getBookTitle)   // ordered by title
+                .containsExactly("A Philosophy of Software Design", "Domain-Driven Design");
+    }
+
     // Verifies: the same book can carry different states across two different events.
     @Test
     void sameBook_hasIndependentRowsPerEvent() {

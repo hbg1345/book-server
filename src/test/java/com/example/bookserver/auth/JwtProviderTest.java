@@ -42,8 +42,13 @@ class JwtProviderTest {
     @Test
     void parse_throws_whenTampered() {
         String token = jwt.issueAccessToken(UUID.randomUUID());
-        String tampered = token.substring(0, token.length() - 1)
-                + (token.endsWith("a") ? "b" : "a");
+        // Flip the FIRST character of the signature segment. The last base64url char of
+        // a 32-byte HMAC carries padding bits, so some single-char flips (e.g. 'a'<->'b')
+        // decode to the same signature and would not be detected — a flaky test. The
+        // first char is fully significant, so any change always breaks verification.
+        int sig = token.lastIndexOf('.') + 1;
+        char c = token.charAt(sig);
+        String tampered = token.substring(0, sig) + (c == 'A' ? 'B' : 'A') + token.substring(sig + 1);
 
         assertThatThrownBy(() -> jwt.parseUserId(tampered))
                 .isInstanceOf(JwtException.class);

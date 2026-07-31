@@ -17,6 +17,10 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import com.example.bookserver.auth.InvalidRefreshTokenException;
 import com.example.bookserver.book.BookNotFoundException;
 import com.example.bookserver.cart.CartItemNotFoundException;
+import com.example.bookserver.purchase.EmptyCartException;
+import com.example.bookserver.purchase.IllegalOrderStateException;
+import com.example.bookserver.purchase.InsufficientInventoryException;
+import com.example.bookserver.purchase.OrderNotFoundException;
 import com.example.bookserver.user.DuplicateUserIdException;
 import com.example.bookserver.user.InvalidCredentialsException;
 import com.example.bookserver.user.InvalidPasswordException;
@@ -52,6 +56,30 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(CartItemNotFoundException.class)
     public ProblemDetail handleCartItemNotFound(CartItemNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Acting on an order that does not exist for this user. */
+    @ExceptionHandler(OrderNotFoundException.class)
+    public ProblemDetail handleOrderNotFound(OrderNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Placing an order from an empty cart. */
+    @ExceptionHandler(EmptyCartException.class)
+    public ProblemDetail handleEmptyCart(EmptyCartException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** Not enough stock to reserve for an order. */
+    @ExceptionHandler(InsufficientInventoryException.class)
+    public ProblemDetail handleInsufficientInventory(InsufficientInventoryException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** A state transition not allowed from the order's current state (pay/cancel). */
+    @ExceptionHandler(IllegalOrderStateException.class)
+    public ProblemDetail handleIllegalOrderState(IllegalOrderStateException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     /** Wrong current password on a password change. */

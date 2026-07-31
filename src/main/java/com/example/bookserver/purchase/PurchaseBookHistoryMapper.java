@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 
 @Mapper
@@ -28,6 +30,23 @@ public interface PurchaseBookHistoryMapper {
             ORDER BY book_uuid
             """)
     List<PurchaseBookHistory> findByHistoryUuid(UUID historyUuid);
+
+    // the per-book lines of one state event, joined with each book's title for the
+    // order-detail view. Served by the PK's leftmost prefix (history_uuid).
+    @Select("""
+            SELECT pbh.book_uuid, b.book_title, pbh.quantity, pbh.price
+            FROM purchase_book_history pbh
+            JOIN book b ON b.book_uuid = pbh.book_uuid
+            WHERE pbh.history_uuid = #{historyUuid}
+            ORDER BY b.book_title
+            """)
+    @Results({
+            @Result(property = "bookUuid", column = "book_uuid"),
+            @Result(property = "bookTitle", column = "book_title"),
+            @Result(property = "quantity", column = "quantity"),
+            @Result(property = "price", column = "price")
+    })
+    List<OrderBookItem> findItemsWithBookByHistoryUuid(UUID historyUuid);
 
     // a single book's row within one state event — full PK point lookup
     @Select("""

@@ -1,0 +1,126 @@
+package com.example.bookserver.purchase;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+
+import com.example.bookserver.TestcontainersConfiguration;
+import com.jayway.jsonpath.JsonPath;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * End-to-end smoke test for the order flow under JWT security, against the real DB:
+ * register → login → create a book → add to cart → place order → pay → cancel.
+ * Proves stock is reserved and restored and that the state timeline is recorded.
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
+@Import(TestcontainersConfiguration.class)
+@Sql("/schema.sql")
+class PurchaseControllerIntegrationTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    private static final String REGISTER_BODY = """
+            {"userId":"jdoe","password":"secret","userName":"Jane Doe",
+             "phone":"010-1234-5678","birthDate":"1990-05-20"}
+            """;
+
+    private static final String LOGIN_BODY = """
+            {"userId":"jdoe","password":"secret"}
+            """;
+
+    private static final String BOOK_BODY = """
+            {"bookTitle":"Clean Architecture","bookDescription":"desc","price":39.99,
+             "publishDate":"2021-01-01","publisher":"Wikibooks","inventory":10}
+            """;
+
+    private String registerAndLogin() throws Exception {
+        mockMvc.perform(post("/api/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(REGISTER_BODY))
+                .andExpect(status().isCreated());
+        MvcResult login = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(LOGIN_BODY))
+                .andExpect(status().isOk())
+                .andReturn();
+        return JsonPath.read(login.getResponse().getContentAsString(), "$.accessToken");
+    }
+
+    private String createBook() throws Exception {
+        MvcResult res = mockMvc.perform(post("/api/books")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(BOOK_BODY))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return JsonPath.read(res.getResponse().getContentAsString(), "$.bookUuid");
+    }
+
+    // register -> login -> create book -> add to cart -> place -> pay -> cancel, end to end.
+    @Test
+    void place_pay_cancel_roundTrip() throws Exception {
+        String token = registerAndLogin();
+        String book = createBook();
+
+        mockMvc.perform(post("/api/cart/items").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bookUuid\":\"" + book + "\",\"quantity\":2}"))
+                .andExpect(status().isCreated());
+
+        // place the order -> PAYMENT_PENDING, stock reserved (10 -> 8), cart emptied
+        MvcResult placed = mockMvc.perform(post("/api/orders").header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String order = JsonPath.read(placed.getResponse().getContentAsString(), "$.purchaseUuid");
+
+        mockMvc.perform(get("/api/cart").header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.length()").value(0));   // cart drained into the order
+        mockMvc.perform(get("/api/books/" + book))
+                .andExpect(jsonPath("$.inventory").value(8));   // reserved
+
+        // detail: header + one item (with title/lineTotal) + a one-event timeline
+        mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.purchaseState").value("PAYMENT_PENDING"))
+                .andExpect(jsonPath("$.price").value(79.98))
+                .andExpect(jsonPath("$.items[0].bookTitle").value("Clean Architecture"))
+                .andExpect(jsonPath("$.items[0].quantity").value(2))
+                .andExpect(jsonPath("$.items[0].lineTotal").value(79.98))
+                .andExpect(jsonPath("$.history.length()").value(1));
+
+        // pay -> ORDERED, timeline grows
+        mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.purchaseState").value("ORDERED"))
+                .andExpect(jsonPath("$.history.length()").value(2));
+
+        // cancel -> CANCELLED, stock restored (8 -> 10)
+        mockMvc.perform(post("/api/orders/" + order + "/cancel").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.purchaseState").value("CANCELLED"))
+                .andExpect(jsonPath("$.history.length()").value(3));
+        mockMvc.perform(get("/api/books/" + book))
+                .andExpect(jsonPath("$.inventory").value(10));   // stock given back
+    }
+
+    // orders require authentication.
+    @Test
+    void orders_returns401_withoutToken() throws Exception {
+        mockMvc.perform(get("/api/orders"))
+                .andExpect(status().isUnauthorized());
+    }
+}
