@@ -16,6 +16,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 import com.example.bookserver.auth.InvalidRefreshTokenException;
 import com.example.bookserver.book.BookNotFoundException;
+import com.example.bookserver.cart.CartItemNotFoundException;
 import com.example.bookserver.user.DuplicateUserIdException;
 import com.example.bookserver.user.InvalidCredentialsException;
 import com.example.bookserver.user.InvalidPasswordException;
@@ -44,6 +45,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     /** Operating on a book_uuid that does not exist. */
     @ExceptionHandler(BookNotFoundException.class)
     public ProblemDetail handleBookNotFound(BookNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Changing the quantity of a book that is not in the user's cart. */
+    @ExceptionHandler(CartItemNotFoundException.class)
+    public ProblemDetail handleCartItemNotFound(CartItemNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 

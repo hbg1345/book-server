@@ -90,6 +90,25 @@ public class CartItemMapperTest {
                 .containsExactlyInAnyOrder(book1, book2);
     }
 
+    // Verifies: findByUserWithBook joins each cart row with its book, exposing
+    // the title and price alongside the quantity (the enriched cart view).
+    @Test
+    void findByUserWithBook_joinsBookTitleAndPrice() {
+        UUID userUuid = persistUser();
+        UUID bookUuid = persistBook();
+        cartItemMapper.insert(new CartItem(userUuid, bookUuid, 3, null));
+
+        assertThat(cartItemMapper.findByUserWithBook(userUuid))
+                .singleElement()
+                .satisfies(view -> {
+                    assertThat(view.getBookUuid()).isEqualTo(bookUuid);
+                    assertThat(view.getBookTitle()).isEqualTo("Clean Architecture");
+                    assertThat(view.getPrice()).isEqualByComparingTo(new BigDecimal("39.99"));
+                    assertThat(view.getQuantity()).isEqualTo(3);
+                    assertThat(view.getCreatedAt()).isNotNull();
+                });
+    }
+
     // Verifies: updateQuantity changes the quantity of an existing cart item
     // (identified by the composite user+book key) and the new value persists.
     @Test
