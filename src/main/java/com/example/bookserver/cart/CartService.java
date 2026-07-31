@@ -54,6 +54,11 @@ public class CartService {
         cartItemMapper.delete(userUuid, bookUuid);
     }
 
+    /** Empty the whole cart (e.g. once its items become an order). */
+    public void clear(UUID userUuid) {
+        cartItemMapper.deleteByUser(userUuid);
+    }
+
     private void requireBook(UUID bookUuid) {
         if (bookMapper.findById(bookUuid) == null) {
             throw new BookNotFoundException(bookUuid);
