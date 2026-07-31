@@ -14,7 +14,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 /**
  * Stateless JWT security. No sessions, no CSRF (the API carries auth in the
  * Authorization header, not an auto-attached cookie). Auth endpoints and the public
- * catalog are open; {@code /api/users/me/**} requires a valid access token. Book/author
+ * catalog are open; {@code /api/users/me/**} and {@code /api/cart/**} require a valid
+ * access token. Book/author
  * writes stay open for now — they'll be locked down when roles are introduced.
  */
 @Configuration
@@ -36,6 +37,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()          // login / refresh / logout
                         .requestMatchers(HttpMethod.POST, "/api/users").permitAll()  // register
                         .requestMatchers("/api/users/**").authenticated()     // /users/me and below
+                        .requestMatchers("/api/cart/**").authenticated()      // the caller's own cart
                         .anyRequest().permitAll())                            // catalog + everything else (for now)
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
