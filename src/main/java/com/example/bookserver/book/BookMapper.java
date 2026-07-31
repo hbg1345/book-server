@@ -66,6 +66,22 @@ public interface BookMapper {
     })
     List<Author> findAuthorsByBookId(UUID bookUuid);
 
+    // Atomically reserve stock: only succeeds while enough inventory remains.
+    // Returns the number of rows updated (1 = reserved, 0 = insufficient stock),
+    // so the caller can detect an out-of-stock book without a separate read+race.
+    @Update("""
+            UPDATE book SET inventory = inventory - #{quantity}
+            WHERE book_uuid = #{bookUuid} AND inventory >= #{quantity}
+            """)
+    int decrementInventory(@Param("bookUuid") UUID bookUuid, @Param("quantity") int quantity);
+
+    // Give stock back (e.g. an order is cancelled). Always applies.
+    @Update("""
+            UPDATE book SET inventory = inventory + #{quantity}
+            WHERE book_uuid = #{bookUuid}
+            """)
+    void incrementInventory(@Param("bookUuid") UUID bookUuid, @Param("quantity") int quantity);
+
     @Update("""
             UPDATE book SET
                 book_title = #{bookTitle},

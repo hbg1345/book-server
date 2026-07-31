@@ -55,6 +55,33 @@ public class BookMapperTest {
         assertThat(found.getAuthors()).isNull();   // findById does not fetch authors
     }
 
+    // Verifies: decrementInventory reserves stock while enough remains (returns 1
+    // and lowers the count), and refuses once the request exceeds stock (returns 0,
+    // leaves inventory untouched) — the atomic out-of-stock guard.
+    @Test
+    void decrementInventory_reservesWhileEnough_thenRefuses() {
+        UUID bookId = Uuids.newId();
+        bookMapper.insert(sampleBook(bookId));   // inventory 10
+
+        assertThat(bookMapper.decrementInventory(bookId, 4)).isEqualTo(1);
+        assertThat(bookMapper.findById(bookId).getInventory()).isEqualTo(6);
+
+        // asking for more than the remaining 6 is refused, nothing changes
+        assertThat(bookMapper.decrementInventory(bookId, 7)).isZero();
+        assertThat(bookMapper.findById(bookId).getInventory()).isEqualTo(6);
+    }
+
+    // Verifies: incrementInventory gives stock back (e.g. on cancel).
+    @Test
+    void incrementInventory_addsStockBack() {
+        UUID bookId = Uuids.newId();
+        bookMapper.insert(sampleBook(bookId));   // inventory 10
+
+        bookMapper.incrementInventory(bookId, 3);
+
+        assertThat(bookMapper.findById(bookId).getInventory()).isEqualTo(13);
+    }
+
     // 2. the M:N relation on its own
     // Verifies: after linking authors to a book, findAuthorsByBookId returns
     // exactly those authors (the join table + join query work).

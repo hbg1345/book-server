@@ -63,4 +63,8 @@ public interface CartItemMapper {
             WHERE user_uuid = #{userUuid} AND book_uuid = #{bookUuid}
             """)
     void delete(@Param("userUuid") UUID userUuid, @Param("bookUuid") UUID bookUuid);
+
+    // empty a user's whole cart (e.g. after its items are turned into an order)
+    @Delete("DELETE FROM cart_item WHERE user_uuid = #{userUuid}")
+    void deleteByUser(UUID userUuid);
 }
