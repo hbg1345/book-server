@@ -123,6 +123,19 @@ public class CartItemMapperTest {
                 .isEqualTo(5);
     }
 
+    // Verifies: deleteByUser empties the whole cart (all books) for that user,
+    // e.g. after its items are turned into an order.
+    @Test
+    void deleteByUser_emptiesWholeCart() {
+        UUID userUuid = persistUser();
+        cartItemMapper.insert(new CartItem(userUuid, persistBook(), 1, null));
+        cartItemMapper.insert(new CartItem(userUuid, persistBook(), 2, null));
+
+        cartItemMapper.deleteByUser(userUuid);
+
+        assertThat(cartItemMapper.findByUser(userUuid)).isEmpty();
+    }
+
     // Verifies: delete removes the cart item so it can no longer be found
     // (i.e. the book was taken out of the user's cart).
     @Test
