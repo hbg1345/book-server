@@ -38,6 +38,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/users").permitAll()  // register
                         .requestMatchers("/api/users/**").authenticated()     // /users/me and below
                         .requestMatchers("/api/cart/**").authenticated()      // the caller's own cart
+                        .requestMatchers("/api/orders/**").authenticated()    // the caller's own orders
                         .anyRequest().permitAll())                            // catalog + everything else (for now)
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
