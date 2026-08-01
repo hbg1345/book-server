@@ -1,3 +1,15 @@
-/gradlew text eol=lf
+# Normalize line endings: store LF in the repo, check out native on each host.
+* text=auto
+
+# Files executed by / consumed inside Linux containers MUST stay LF on every host
+# (a CRLF gradlew or Dockerfile breaks the image build on Windows checkouts).
+/gradlew           text eol=lf
+Dockerfile         text eol=lf
+*.sh               text eol=lf
+docker-compose.yml text eol=lf
+
+# Windows-only scripts keep CRLF
 *.bat text eol=crlf
+
+# Never touch binaries
 *.jar binary

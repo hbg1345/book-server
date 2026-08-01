@@ -1,0 +1,15 @@
+# keep the build context small & the build reproducible (don't ship host artifacts)
+.git
+.gitignore
+.idea
+*.iml
+build
+.gradle
+bin
+out
+docker-compose.yml
+Dockerfile
+.dockerignore
+.env
+README*.md
+HELP.md
