@@ -30,6 +30,7 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
     runtimeOnly 'org.postgresql:postgresql'
+    runtimeOnly 'com.google.cloud.sql:postgres-socket-factory:1.21.0'   // Cloud SQL connector (prod only; dormant locally)
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-restdocs'
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
