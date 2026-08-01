@@ -38,3 +38,6 @@ out/
 
 ### DBSchema backups ###
 *.dbs.bak
+
+# local secrets
+.env
