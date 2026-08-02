@@ -1,8 +1,9 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '4.0.7'
+    id 'org.springframework.boot' version '4.1.0'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'org.asciidoctor.jvm.convert' version '4.0.5'
+    id 'com.epages.restdocs-api-spec' version '0.20.1'   // generates an OpenAPI 3 spec from the same RestDocs tests (0.20.x = Spring Boot 4 compatible)
 }
 
 group = 'com.example'
@@ -26,24 +27,25 @@ ext {
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'   // jakarta bean validation (@Valid)
-    implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.0.1'
+    implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.1.0'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
     runtimeOnly 'org.postgresql:postgresql'
-    runtimeOnly 'com.google.cloud.sql:postgres-socket-factory:1.21.0'   // Cloud SQL connector (prod only; dormant locally)
+    runtimeOnly 'com.google.cloud.sql:postgres-socket-factory:1.29.0'   // Cloud SQL connector (prod only; dormant locally)
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-restdocs'
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
-    testImplementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter-test:4.0.1'
+    testImplementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter-test:4.1.0'
     testImplementation 'org.springframework.restdocs:spring-restdocs-mockmvc'
+    testImplementation 'com.epages:restdocs-api-spec-mockmvc:0.20.1'   // wraps document() to also emit OpenAPI
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
-    implementation 'com.github.f4b6a3:uuid-creator:6.0.0'   // UUIDv7 (time-ordered) id generation
+    implementation 'com.github.f4b6a3:uuid-creator:6.1.1'   // UUIDv7 (time-ordered) id generation
     implementation 'org.springframework.boot:spring-boot-starter-security'   // authn/authz filter chain
-    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'                          // JWT (access token)
-    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
-    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+    implementation 'io.jsonwebtoken:jjwt-api:0.13.0'                          // JWT (access token)
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.13.0'
     testCompileOnly 'org.projectlombok:lombok'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testAnnotationProcessor 'org.projectlombok:lombok'
@@ -75,5 +77,23 @@ tasks.register('benchmark', Test) {
 tasks.named('asciidoctor') {
     inputs.dir snippetsDir
     attributes 'snippets': snippetsDir   // lets index.adoc reference {snippets}/...
+    dependsOn test
+}
+
+// Emit a single OpenAPI 3 spec (build/api-spec/openapi3.yaml) from the RestDocs tests.
+// `server` is the deployed Cloud Run URL so Swagger UI's "Try it out" hits the live API.
+openapi3 {
+    server = 'https://book-server-912285810536.asia-northeast3.run.app'
+    title = 'Book Server API'
+    description = 'Online bookstore REST API (JWT auth: send Authorization: Bearer <accessToken>).'
+    version = project.version
+    format = 'yaml'
+    outputDirectory = 'build/api-spec'
+    outputFileNamePrefix = 'openapi3'
+}
+
+// The spec is built from the `resource.json` snippets the tests emit, so tests must run first.
+// The plugin registers `openapi3` late (afterEvaluate), so match it lazily rather than by name.
+tasks.matching { it.name == 'openapi3' }.configureEach {
     dependsOn test
 }
