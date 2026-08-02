@@ -7,8 +7,7 @@
 CREATE TABLE category (
     category_uuid UUID         PRIMARY KEY,
     parent_uuid   UUID         REFERENCES category (category_uuid) ON DELETE CASCADE,
-    name          VARCHAR(255) NOT NULL,
-    depth         INT          NOT NULL
+    name          VARCHAR(255) NOT NULL
 );
 
 -- A parent has at most one child of a given name; the two partial indexes also
@@ -18,6 +17,10 @@ CREATE UNIQUE INDEX uq_category_child_name ON category (parent_uuid, name) WHERE
 
 -- Subtree walks ("children of X") start from parent_uuid.
 CREATE INDEX idx_category_parent ON category (parent_uuid);
+
+-- The catalog includes corporate authors ("University of ... (COR)") whose names
+-- exceed the original VARCHAR(100); widen so the V3 seed keeps full names untruncated.
+ALTER TABLE author ALTER COLUMN author_name TYPE TEXT;
 
 ALTER TABLE book
     ADD COLUMN category_uuid UUID REFERENCES category (category_uuid) ON DELETE SET NULL;

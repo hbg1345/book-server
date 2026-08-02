@@ -30,7 +30,7 @@ public class V3__Seed_book_catalog extends BaseJavaMigration {
         // author have no external dependency; book references category; book_author
         // references book and author.
         copyGz(copy, "db/seed/categories.csv.gz",
-                "COPY category (category_uuid, parent_uuid, name, depth) "
+                "COPY category (category_uuid, parent_uuid, name) "
                         + "FROM STDIN WITH (FORMAT csv, HEADER true)");
         copyGz(copy, "db/seed/authors.csv.gz",
                 "COPY author (author_uuid, author_name) "

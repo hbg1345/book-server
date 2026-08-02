@@ -4,7 +4,7 @@
 		<table name="Entity" />
 		<table name="author" prior="Enti" >
 			<column name="author_uuid" type="UUID" mandatory="y" />
-			<column name="author_name" type="NVARCHAR" length="100" mandatory="y" />
+			<column name="author_name" type="TEXT" mandatory="y" />
 			<index name="pk_author_uuid" unique="UNIQUE_KEY" >
 				<column name="author_uuid" />
 			</index>
@@ -23,9 +23,16 @@
 			<column name="publish_date" type="DATE" mandatory="y" />
 			<column name="publisher" type="NVARCHAR" length="100" mandatory="y" />
 			<column name="inventory" type="INT" mandatory="y" />
+			<column name="category_uuid" type="UUID" />
 			<index name="pk_book" unique="PRIMARY_KEY" >
 				<column name="book_uuid" />
 			</index>
+			<index name="idx_book_category" unique="NORMAL" >
+				<column name="category_uuid" />
+			</index>
+			<fk name="fk_book_category" to_schema="Schema_" to_table="category" type="NonIdentifying" mandatory="n" cardinality="ZeroMore" range_from="0" range_to="0" >
+				<fk_column name="category_uuid" pk="category_uuid" />
+			</fk>
 		</table>
 		<table name="book_author" prior="book_auth" >
 			<column name="book_uuid" type="UUID" mandatory="y" />
@@ -74,6 +81,27 @@
 			</fk>
 			<fk name="fk_cart_item_book_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
 				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+		</table>
+		<table name="category" prior="cat" >
+			<column name="category_uuid" type="UUID" mandatory="y" />
+			<column name="parent_uuid" type="UUID" />
+			<column name="name" type="VARCHAR" length="255" mandatory="y" />
+			<index name="pk_category" unique="PRIMARY_KEY" >
+				<column name="category_uuid" />
+			</index>
+			<index name="uq_category_root_name" unique="UNIQUE_KEY" >
+				<column name="name" />
+			</index>
+			<index name="uq_category_child_name" unique="UNIQUE_KEY" >
+				<column name="parent_uuid" />
+				<column name="name" />
+			</index>
+			<index name="idx_category_parent" unique="NORMAL" >
+				<column name="parent_uuid" />
+			</index>
+			<fk name="fk_category_parent" to_schema="Schema_" to_table="category" type="NonIdentifying" mandatory="n" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
+				<fk_column name="parent_uuid" pk="category_uuid" />
 			</fk>
 		</table>
 		<table name="purchase_book_history" prior="purchase_book" >
@@ -161,6 +189,7 @@
 			<entity schema="Schema_" name="book_author" color="C1D8EE" x="760" y="57" />
 			<entity schema="Schema_" name="book_user" color="C1D8EE" x="57" y="57" />
 			<entity schema="Schema_" name="cart_item" color="C1D8EE" x="304" y="57" />
+			<entity schema="Schema_" name="category" color="C1D8EE" x="817" y="171" />
 			<entity schema="Schema_" name="purchase_book_history" color="C1D8EE" x="741" y="323" />
 			<entity schema="Schema_" name="purchase_current" color="3986C1" x="152" y="323" />
 			<entity schema="Schema_" name="purchase_history" color="C1D8EE" x="437" y="323" />
