@@ -6,8 +6,20 @@ DROP TABLE IF EXISTS purchase_history;
 DROP TABLE IF EXISTS cart_item;
 DROP TABLE IF EXISTS book_author;
 DROP TABLE IF EXISTS book;
+DROP TABLE IF EXISTS category;
 DROP TABLE IF EXISTS author;
 DROP TABLE IF EXISTS book_user;
+
+-- Category taxonomy (normalized tree; parent_uuid NULL = top-level category)
+CREATE TABLE category (
+    category_uuid UUID         PRIMARY KEY,
+    parent_uuid   UUID         REFERENCES category (category_uuid) ON DELETE CASCADE,
+    name          VARCHAR(255) NOT NULL,
+    depth         INT          NOT NULL
+);
+-- A parent has at most one child of a given name (and only one top-level of a name).
+CREATE UNIQUE INDEX uq_category_root_name  ON category (name)              WHERE parent_uuid IS NULL;
+CREATE UNIQUE INDEX uq_category_child_name ON category (parent_uuid, name) WHERE parent_uuid IS NOT NULL;
 
 -- Books
 CREATE TABLE book (
@@ -17,7 +29,8 @@ CREATE TABLE book (
     price            DECIMAL(10, 2) NOT NULL,
     publish_date     DATE           NOT NULL,
     publisher        VARCHAR(100)   NOT NULL,
-    inventory        INT            NOT NULL
+    inventory        INT            NOT NULL,
+    category_uuid    UUID           REFERENCES category (category_uuid) ON DELETE SET NULL
 );
 
 -- Authors
