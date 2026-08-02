@@ -39,14 +39,23 @@ jobs:
       #    the suite runs once, not a second time just for docs.
       #    (Testcontainers spins up PostgreSQL via the runner's Docker.)
       - name: Run tests and build API docs
-        run: bash ./gradlew asciidoctor
+        run: bash ./gradlew asciidoctor openapi3
 
-      # 4. Package the generated docs for Pages — only on push to master (skip on PRs)
+      # 4. Assemble the Pages site: Swagger UI + the generated OpenAPI spec.
+      #    (Swagger UI fetches ./openapi3.yaml, so both live in the same folder.)
+      - name: Assemble docs site
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p site
+          cp src/docs/swagger-ui/index.html site/index.html
+          cp build/api-spec/openapi3.yaml site/openapi3.yaml
+
+      # 5. Package the site for Pages — only on push to master (skip on PRs)
       - name: Upload Pages artifact
         if: github.event_name == 'push'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: build/docs/asciidoc
+          path: site
 
   # Deploy the docs to GitHub Pages — only on push to master
   deploy-docs:
