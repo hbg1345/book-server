@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @MybatisTest
 @Import(TestcontainersConfiguration.class)
-@Sql("/schema.sql")
+@Sql("/reset.sql")
 public class PurchaseCurrentMapperTest {
 
     private static final LocalDateTime BASE = LocalDateTime.of(2026, 1, 1, 10, 0, 0);

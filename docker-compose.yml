@@ -11,8 +11,8 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # runs once, on first init of an empty data dir, to create the schema
-      - ./src/test/resources/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      # Schema is NOT created here — the app owns it via Flyway (V1 schema, V2 category,
+      # V3 catalog seed), so it runs identically in docker, local bootRun, and prod.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bookuser} -d ${POSTGRES_DB:-bookdb}"]
       interval: 5s

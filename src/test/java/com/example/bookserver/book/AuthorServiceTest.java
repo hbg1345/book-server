@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @MybatisTest
 @Import(TestcontainersConfiguration.class)
-@Sql("/schema.sql")
+@Sql("/reset.sql")
 public class AuthorServiceTest {
 
     @Autowired

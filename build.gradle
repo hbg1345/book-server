@@ -30,7 +30,7 @@ dependencies {
     implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.1.0'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
-    runtimeOnly 'org.postgresql:postgresql'
+    implementation 'org.postgresql:postgresql'   // compile-scoped: the V3 Flyway Java migration uses CopyManager directly
     runtimeOnly 'com.google.cloud.sql:postgres-socket-factory:1.29.0'   // Cloud SQL connector (prod only; dormant locally)
     implementation 'org.springframework.boot:spring-boot-starter-flyway' // Flyway + Boot 4 autoconfig (split into its own module in Boot 4; flyway-core alone does NOT run migrations on startup)
     runtimeOnly 'org.flywaydb:flyway-database-postgresql'                // Flyway's Postgres support module
@@ -56,6 +56,10 @@ dependencies {
 
 tasks.named('test') {
     outputs.dir snippetsDir
+    // Flyway builds the test schema too (single source of truth, no drift with prod),
+    // but we stop at V2 so the heavy V3 catalog seed does not load in every test
+    // context. Tests reset rows between methods via @Sql("/reset.sql").
+    systemProperty 'spring.flyway.target', '2'
     useJUnitPlatform {
         excludeTags 'benchmark'   // keep the heavy 1M-row benchmark out of the normal test run
     }
