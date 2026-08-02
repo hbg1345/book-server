@@ -32,6 +32,8 @@ dependencies {
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
     runtimeOnly 'org.postgresql:postgresql'
     runtimeOnly 'com.google.cloud.sql:postgres-socket-factory:1.29.0'   // Cloud SQL connector (prod only; dormant locally)
+    implementation 'org.flywaydb:flyway-core'                            // DB schema migrations (runs on startup)
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'                // Flyway's Postgres support module
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-restdocs'
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
