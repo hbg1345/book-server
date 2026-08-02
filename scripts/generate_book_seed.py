@@ -10,7 +10,6 @@ All four files share pre-generated UUIDs, so ALWAYS regenerate them together.
 See memory/book-catalog-seed-pipeline.md for the rationale behind the data decisions.
 """
 import csv, re, gzip, uuid
-from collections import Counter
 
 SRC = "archive/BooksDatasetClean.csv"
 OUT = "src/main/resources/db/seed"
@@ -18,7 +17,7 @@ OUT = "src/main/resources/db/seed"
 MONTHS = {m.lower(): i for i, m in enumerate(
     ["January", "February", "March", "April", "May", "June", "July", "August",
      "September", "October", "November", "December"], 1)}
-ROLE = re.compile(r'\s*\((?:[A-Z]{2,4})\)\s*$')          # trailing role code: (COM),(EDT),(ILT)...
+ROLE_END = re.compile(r'\s*\((?:[A-Z]{2,4})\)\s*$')      # trailing role code: (COM),(EDT),(ILT),(COR)...
 
 # Required fields — a row missing any of these is dropped (description/category may be empty).
 REQUIRED = ["Title", "Authors", "Publisher",
@@ -26,24 +25,56 @@ REQUIRED = ["Title", "Authors", "Publisher",
 DEFAULT_INVENTORY = "100"
 
 
-def parse_authors(field):
-    """'By Last, First (COM) and Last2, First2' -> ['Last, First', 'Last2, First2'].
+def _split_top_and(s):
+    """Split on ' and ' only at paren depth 0 (protects '(Birmingham, Ala.)' etc.)."""
+    out, depth, last, i = [], 0, 0, 0
+    while i < len(s):
+        c = s[i]
+        if c == '(':
+            depth += 1
+        elif c == ')':
+            depth = max(0, depth - 1)
+        elif depth == 0 and s[i:i + 5] == " and ":
+            out.append(s[last:i]); last = i + 5; i += 5; continue
+        i += 1
+    out.append(s[last:])
+    return out
 
-    Each author is a 'Last, First' pair (one comma), so we split on comma and pair
-    tokens two-by-two after normalizing the ' and '/' , and ' separators.
+
+def parse_authors(field):
+    """Split the 'By ...' author field into individual author names.
+
+    Personal authors are 'Last, First' (one internal comma); corporate authors
+    ('University of X (COR)') carry commas of their own. We use the trailing role
+    code (COR)/(EDT)/(ILT)/... as the end-of-author marker, and fall back to pairing
+    two comma tokens for role-less personal names. Not perfect: an ' and ' inside an
+    org name outside parens (e.g. 'Food and Nutrition') can still over-split — the
+    separators are ambiguous with in-name text. Role codes are stripped from the
+    stored name.
     """
     s = field.strip()
     if s.lower().startswith("by "):
         s = s[3:]
-    s = s.replace(", and ", ", ").replace(" and ", ", ")
+    s = s.replace(", and ", ", ")                 # oxford conjunction -> comma separator
+    s = ", ".join(_split_top_and(s))              # 2-author ' and ' -> comma separator
     toks = [t.strip() for t in s.split(",") if t.strip()]
-    out, i = [], 0
-    while i < len(toks):
-        name = (toks[i] + ", " + toks[i + 1]) if i + 1 < len(toks) else toks[i]
-        i += 2 if i + 1 < len(toks) else 1
-        name = ROLE.sub("", name).strip()
-        if name:
-            out.append(name)
+
+    out, buf = [], []
+
+    def flush():
+        if buf:
+            name = ROLE_END.sub("", ", ".join(buf)).strip()
+            if name:
+                out.append(name)
+        buf.clear()
+
+    for tok in toks:
+        buf.append(tok)
+        if ROLE_END.search(tok):                  # role code ends an author unit
+            flush()
+        elif len(buf) == 2:                       # 'Last, First' personal pair
+            flush()
+    flush()
     return out
 
 
@@ -64,14 +95,14 @@ def main():
     def resolve_leaf(path):
         nonlocal cat_trunc
         parent = None
-        for depth, name in enumerate(path):
+        for name in path:
             if len(name) > 255:
                 name = name[:255]; cat_trunc += 1
             key = (parent, name)
             cid = cat_id.get(key)
             if cid is None:
                 cid = str(uuid.uuid4()); cat_id[key] = cid
-                cat_rows.append((cid, parent or "", name, str(depth)))
+                cat_rows.append((cid, parent or "", name))   # (uuid, parent_uuid_or_'', name)
             parent = cid
         return parent      # leaf uuid, or None for an empty path
 
@@ -97,18 +128,21 @@ def main():
             buuid = str(uuid.uuid4())
             books.append((buuid, title, desc, leaf or "", f"{price:.2f}",
                           f"{int(yr):04d}-{mon:02d}-01", pub, DEFAULT_INVENTORY))
+            seen = set()      # a book can list the same person as author & editor; (book,author) is a PK
             for name in parse_authors(row["Authors"]):
                 aid = author_id.get(name)
                 if aid is None:
                     aid = str(uuid.uuid4()); author_id[name] = aid
-                links.append((buuid, aid))
+                if aid not in seen:
+                    seen.add(aid)
+                    links.append((buuid, aid))
             kept += 1
 
     def write_gz(path, header, rows):
         with gzip.open(path, "wt", encoding="utf-8", newline="") as gz:
             w = csv.writer(gz); w.writerow(header); w.writerows(rows)
 
-    write_gz(f"{OUT}/categories.csv.gz", ["category_uuid", "parent_uuid", "name", "depth"], cat_rows)
+    write_gz(f"{OUT}/categories.csv.gz", ["category_uuid", "parent_uuid", "name"], cat_rows)
     write_gz(f"{OUT}/authors.csv.gz", ["author_uuid", "author_name"],
              [(u, n) for n, u in author_id.items()])
     write_gz(f"{OUT}/books.csv.gz",
@@ -116,10 +150,9 @@ def main():
               "price", "publish_date", "publisher", "inventory"], books)
     write_gz(f"{OUT}/book_authors.csv.gz", ["book_uuid", "author_uuid"], links)
 
-    depths = Counter(int(r[3]) for r in cat_rows)
     roots = sum(1 for r in cat_rows if r[1] == "")
     print(f"kept books: {kept} | with category: {with_cat}")
-    print(f"category nodes: {len(cat_rows)} | roots: {roots} | depth dist: {dict(sorted(depths.items()))}")
+    print(f"category nodes: {len(cat_rows)} | roots (top-level): {roots}")
     print(f"authors: {len(author_id)} | book-author links: {len(links)}")
     print(f"dropped null: {drop_null} date: {drop_date} | trunc title: {trunc_title} "
           f"pub: {trunc_pub} cat: {cat_trunc}")
