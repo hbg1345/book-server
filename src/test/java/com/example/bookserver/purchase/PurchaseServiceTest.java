@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @MybatisTest
 @Import(TestcontainersConfiguration.class)
-@Sql("/schema.sql")
+@Sql("/reset.sql")
 public class PurchaseServiceTest {
 
     @Autowired

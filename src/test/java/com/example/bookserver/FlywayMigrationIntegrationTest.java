@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Guards that Flyway actually runs on application startup. This is deliberately
- * independent of the {@code @Sql("/schema.sql")} mechanism the other tests use:
+ * independent of the {@code @Sql("/reset.sql")} mechanism the other tests use:
  * it asserts on {@code flyway_schema_history}, a table only Flyway creates. If the
  * Flyway autoconfiguration is missing (e.g. only {@code flyway-core} on the
  * classpath without {@code spring-boot-starter-flyway}), this table won't exist
