@@ -2,6 +2,7 @@ package com.example.bookserver.purchase;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -225,5 +226,57 @@ public class PurchaseServiceTest {
         assertThatThrownBy(() -> purchaseService.cancel(user, purchaseUuid))
                 .isInstanceOf(IllegalOrderStateException.class);
         assertThat(bookMapper.findById(book).getInventory()).isEqualTo(10);   // not 12
+    }
+
+    // the sweep query returns pending orders older than the cutoff, but not ones that are
+    // still fresh (placed after the cutoff) nor ones that have already been paid.
+    @Test
+    void findUnpaidOrdersBefore_returnsOnlyStalePending() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 30);
+        cartService.addItem(user, book, 1);
+        UUID pending = purchaseService.placeOrder(user);         // stays PAYMENT_PENDING
+        cartService.addItem(user, book, 1);
+        UUID paid = purchaseService.placeOrder(user);
+        purchaseService.pay(user, paid);                        // now ORDERED, not pending
+
+        // a cutoff in the future treats the just-placed order as stale; the paid one is excluded by state
+        assertThat(purchaseService.findUnpaidOrdersBefore(LocalDateTime.now().plusMinutes(1)))
+                .containsExactly(pending);
+        // a cutoff in the past leaves the fresh pending order alone
+        assertThat(purchaseService.findUnpaidOrdersBefore(LocalDateTime.now().minusMinutes(30)))
+                .isEmpty();
+    }
+
+    // expiring an unpaid order cancels it and gives its reserved stock back (reusing cancel).
+    @Test
+    void expireUnpaidOrder_cancelsPending_andRestoresStock() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 2);
+        UUID purchaseUuid = purchaseService.placeOrder(user);   // inventory now 8
+
+        purchaseService.expireUnpaidOrder(purchaseUuid);
+
+        assertThat(currentMapper.findByPurchaseUuid(purchaseUuid).getPurchaseState())
+                .isEqualTo(PurchaseState.CANCELLED);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(10);   // stock released
+    }
+
+    // expiry is a no-op on an order that is no longer pending (e.g. paid between scan and act),
+    // so its stock is not wrongly restored.
+    @Test
+    void expireUnpaidOrder_noOp_whenAlreadyPaid() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 2);
+        UUID purchaseUuid = purchaseService.placeOrder(user);   // inventory now 8
+        purchaseService.pay(user, purchaseUuid);               // ORDERED
+
+        purchaseService.expireUnpaidOrder(purchaseUuid);
+
+        assertThat(currentMapper.findByPurchaseUuid(purchaseUuid).getPurchaseState())
+                .isEqualTo(PurchaseState.ORDERED);             // unchanged
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(8);   // not restored
     }
 }

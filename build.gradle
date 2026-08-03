@@ -32,6 +32,8 @@ dependencies {
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
     implementation 'org.postgresql:postgresql'   // compile-scoped: the V3 Flyway Java migration uses CopyManager directly
     runtimeOnly 'com.google.cloud.sql:postgres-socket-factory:1.29.0'   // Cloud SQL connector (prod only; dormant locally)
+    implementation platform('com.google.cloud:libraries-bom:26.50.0')
+    implementation 'com.google.cloud:google-cloud-tasks'   // schedule per-order expiry tasks (prod only; disabled locally)
     implementation 'org.springframework.boot:spring-boot-starter-flyway' // Flyway + Boot 4 autoconfig (split into its own module in Boot 4; flyway-core alone does NOT run migrations on startup)
     runtimeOnly 'org.flywaydb:flyway-database-postgresql'                // Flyway's Postgres support module
     annotationProcessor 'org.projectlombok:lombok'

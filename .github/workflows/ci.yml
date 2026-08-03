@@ -107,7 +107,11 @@ jobs:
       # Deploy. Cloud SQL is reached via the socket factory:
       #  - --add-cloudsql-instances mounts the instance for the connector
       #  - the JDBC URL names the instance + socketFactory (no host/port, no VPC)
-      #  - password & JWT secret come from GCP Secret Manager, not from env in plain text
+      #  - password, JWT secret & the internal sweep token come from GCP Secret Manager
+      #  - the order.expiry.cloud-tasks.* env turns on per-order Cloud Tasks expiry; the
+      #    matching queue + Cloud Scheduler safety-net job are provisioned once (see README).
+      #    Requires repo Variables: ORDER_EXPIRY_QUEUE, CLOUD_RUN_BASE_URL; and repo/GCP
+      #    Secret: INTERNAL_SWEEP_TOKEN.
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ vars.CLOUD_RUN_SERVICE }} \
@@ -116,5 +120,5 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --add-cloudsql-instances "${{ vars.CLOUD_SQL_INSTANCE }}" \
-            --set-env-vars "SPRING_DATASOURCE_URL=jdbc:postgresql:///${{ vars.DB_NAME }}?cloudSqlInstance=${{ vars.CLOUD_SQL_INSTANCE }}&socketFactory=com.google.cloud.sql.postgres.SocketFactory,SPRING_DATASOURCE_USERNAME=${{ vars.DB_USER }}" \
-            --set-secrets "SPRING_DATASOURCE_PASSWORD=DB_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest"
+            --set-env-vars "SPRING_DATASOURCE_URL=jdbc:postgresql:///${{ vars.DB_NAME }}?cloudSqlInstance=${{ vars.CLOUD_SQL_INSTANCE }}&socketFactory=com.google.cloud.sql.postgres.SocketFactory,SPRING_DATASOURCE_USERNAME=${{ vars.DB_USER }},ORDER_EXPIRY_CLOUD_TASKS_ENABLED=true,GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }},ORDER_EXPIRY_QUEUE_LOCATION=${{ vars.GCP_REGION }},ORDER_EXPIRY_QUEUE=${{ vars.ORDER_EXPIRY_QUEUE }},ORDER_EXPIRY_TARGET_BASE_URL=${{ vars.CLOUD_RUN_BASE_URL }}" \
+            --set-secrets "SPRING_DATASOURCE_PASSWORD=DB_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest,INTERNAL_SWEEP_TOKEN=INTERNAL_SWEEP_TOKEN:latest"
