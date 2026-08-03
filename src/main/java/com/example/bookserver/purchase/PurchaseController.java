@@ -28,15 +28,21 @@ import com.example.bookserver.purchase.dto.PlaceOrderResponse;
 public class PurchaseController {
 
     private final PurchaseService purchaseService;
+    private final OrderExpiryScheduler orderExpiryScheduler;
 
-    public PurchaseController(PurchaseService purchaseService) {
+    public PurchaseController(PurchaseService purchaseService,
+                             OrderExpiryScheduler orderExpiryScheduler) {
         this.purchaseService = purchaseService;
+        this.orderExpiryScheduler = orderExpiryScheduler;
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public PlaceOrderResponse place(@AuthenticationPrincipal UUID userUuid) {
-        return new PlaceOrderResponse(purchaseService.placeOrder(userUuid));
+        UUID purchaseUuid = purchaseService.placeOrder(userUuid);
+        // schedule the precise per-order expiry; best-effort, the periodic sweep is the safety net
+        orderExpiryScheduler.scheduleExpiry(purchaseUuid);
+        return new PlaceOrderResponse(purchaseUuid);
     }
 
     @GetMapping

@@ -2,11 +2,13 @@ package com.example.bookserver.purchase;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,15 +26,34 @@ import org.springframework.web.bind.annotation.RestController;
 public class InternalOrderController {
 
     private final UnpaidOrderSweeper unpaidOrderSweeper;
+    private final PurchaseService purchaseService;
     private final String sweepToken;
 
     public InternalOrderController(UnpaidOrderSweeper unpaidOrderSweeper,
+                                   PurchaseService purchaseService,
                                    @Value("${internal.sweep-token:}") String sweepToken) {
         this.unpaidOrderSweeper = unpaidOrderSweeper;
+        this.purchaseService = purchaseService;
         this.sweepToken = sweepToken;
     }
 
-    /** Cancel unpaid orders past the payment window; returns how many were cancelled. */
+    /**
+     * Expire a single order (Cloud Tasks per-order timer): cancel it and release its stock
+     * if it is still unpaid, else no-op. Idempotent, so Cloud Tasks' at-least-once delivery
+     * is safe.
+     */
+    @PostMapping("/{purchaseUuid}/expire")
+    public ResponseEntity<Void> expireOne(
+            @RequestHeader(value = "X-Internal-Token", required = false) String token,
+            @PathVariable UUID purchaseUuid) {
+        if (!tokenMatches(token)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        purchaseService.expireUnpaidOrder(purchaseUuid);
+        return ResponseEntity.ok().build();
+    }
+
+    /** Cancel all unpaid orders past the payment window (safety-net sweep); returns the count. */
     @PostMapping("/expire-unpaid")
     public ResponseEntity<Integer> expireUnpaid(
             @RequestHeader(value = "X-Internal-Token", required = false) String token) {
