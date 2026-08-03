@@ -62,6 +62,7 @@
 			<column name="created_at" type="DATETIME" length="9999999" mandatory="y" />
 			<column name="birth_date" type="DATE" mandatory="y" />
 			<column name="phone" type="VARCHAR" mandatory="y" />
+			<column name="role" type="VARCHAR" length="20" mandatory="y" />
 			<index name="pk_book_user" unique="PRIMARY_KEY" >
 				<column name="user_uuid" />
 			</index>

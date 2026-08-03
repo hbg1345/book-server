@@ -130,7 +130,7 @@ class UserControllerWebMvcTest {
     void me_returnsProfileWithoutPassword() throws Exception {
         UUID uuid = UUID.randomUUID();
         User user = new User(uuid, "jdoe", "HASHED", "Jane Doe",
-                "010-1234-5678", LocalDate.of(1990, 5, 20),
+                "010-1234-5678", LocalDate.of(1990, 5, 20), Role.USER,
                 java.time.LocalDateTime.of(2026, 7, 30, 10, 0));
         when(userService.getProfile(uuid)).thenReturn(user);
 

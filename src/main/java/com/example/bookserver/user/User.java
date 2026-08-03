@@ -20,5 +20,6 @@ public class User {
     private String userName;
     private String phone;
     private LocalDate birthDate;
+    private Role role;
     private LocalDateTime createdAt;
 }

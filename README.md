@@ -17,8 +17,8 @@ Interactive docs (Swagger UI, generated from the tests and published on every pu
 |------|-----------|------|
 | Auth | `POST /api/auth/login` · `refresh` · `logout` | public |
 | Users | `POST /api/users` (sign up) · `GET/PUT /api/users/me` · `PUT /api/users/me/password` · `DELETE /api/users/me` | bearer (except sign-up) |
-| Books | `GET /api/books` · `GET /api/books/{uuid}` | public read; `POST/PUT/DELETE` open until roles land |
-| Authors | `GET /api/authors?name=` · `POST /api/authors` | public read |
+| Books | `GET /api/books` · `GET /api/books/{uuid}` (public) · `POST/PUT/DELETE` | reads public; writes **admin** |
+| Authors | `GET /api/authors?name=` (public) · `POST /api/authors` | reads public; writes **admin** |
 | Cart | `GET /api/cart` · `POST /api/cart/items` · `PUT/DELETE /api/cart/items/{bookUuid}` | bearer |
 | Orders | `POST /api/orders` · `GET /api/orders` · `GET /api/orders/{uuid}` · `POST .../pay` · `POST .../cancel` | bearer |
 
@@ -26,10 +26,16 @@ Auth is a short-lived access JWT (`Authorization: Bearer <accessToken>`) plus a 
 opaque refresh token. Send the access token on every protected call; use `/api/auth/refresh`
 to swap a refresh token for a fresh pair.
 
+Access control is role-based (`USER` / `ADMIN`). Self-registration always yields a `USER`;
+catalog **writes** (create/update/delete books and authors) require `ADMIN`. Unauthenticated
+requests to a protected route get `401`, authenticated-but-not-admin get `403`. The public
+deployment has no admin, so the live catalog is effectively read-only. To exercise the write
+endpoints, run locally and seed an admin (see [Trying the admin endpoints](#trying-the-admin-endpoints)).
+
 ## Run with Docker
 
 Brings up the app and a PostgreSQL instance together. On first start Flyway builds the
-schema and seeds the catalog (V1 → V2 → V3), so the first boot takes a bit longer.
+schema and seeds the catalog (V1 → V4), so the first boot takes a bit longer.
 
 ```bash
 docker compose up --build
@@ -63,6 +69,31 @@ Everything has a working default for local use; override via a `.env` file or th
 The app reads its DB connection from `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD`,
 which `docker-compose.yml` wires to the `postgres` service.
 
+### Trying the admin endpoints
+
+Catalog writes require the `ADMIN` role, and self-registration only grants `USER`, so an
+admin has to be seeded. A config-driven bootstrap does this on startup — **off by default**,
+enable it for a local run:
+
+```bash
+ADMIN_BOOTSTRAP_ENABLED=true \
+ADMIN_BOOTSTRAP_USER_ID=admin \
+ADMIN_BOOTSTRAP_PASSWORD='choose-a-password' \
+docker compose up --build
+```
+
+Then log in and use the returned `accessToken` as `Authorization: Bearer <token>` on the
+write calls:
+
+```bash
+curl -s localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"userId":"admin","password":"choose-a-password"}'
+```
+
+The bootstrap is idempotent (re-asserts the role on restart) and is intentionally left
+disabled on the public deployment, so the live catalog has no admin.
+
 ## Database & catalog seed
 
 Schema and data are migration-owned; there is no hand-written `schema.sql`.
@@ -70,7 +101,8 @@ Schema and data are migration-owned; there is no hand-written `schema.sql`.
 - `V1__init.sql` — core tables (users, books, authors, cart, orders).
 - `V2__add_category_tree.sql` — normalized category tree (`category(uuid, parent_uuid, name)`,
   self-FK) plus `book.category_uuid`.
-- `V3__Seed_book_catalog.java` — streams four gzipped, pre-normalized files from
+- `V3__add_user_role.sql` — `book_user.role` (`USER`/`ADMIN`) for role-based access control.
+- `V4__Seed_book_catalog.java` — streams four gzipped, pre-normalized files from
   `src/main/resources/db/seed/` into Postgres via `COPY` (categories → authors → books →
   book_authors).
 
