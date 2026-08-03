@@ -51,6 +51,7 @@ public class AuthService {
     }
 
     private TokenResponse issueFor(UUID userUuid, String refreshToken) {
-        return new TokenResponse(jwtProvider.issueAccessToken(userUuid), refreshToken);
+        String role = userService.getRole(userUuid).name();
+        return new TokenResponse(jwtProvider.issueAccessToken(userUuid, role), refreshToken);
     }
 }

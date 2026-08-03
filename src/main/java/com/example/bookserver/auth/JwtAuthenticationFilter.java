@@ -2,9 +2,9 @@ package com.example.bookserver.auth;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.UUID;
 
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -36,8 +36,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String header = request.getHeader("Authorization");
         if (header != null && header.startsWith(PREFIX)) {
             try {
-                UUID userUuid = jwtProvider.parseUserId(header.substring(PREFIX.length()));
-                var authentication = new UsernamePasswordAuthenticationToken(userUuid, null, List.of());
+                JwtProvider.AccessToken token = jwtProvider.parse(header.substring(PREFIX.length()));
+                var authorities = List.of(new SimpleGrantedAuthority("ROLE_" + token.role()));
+                var authentication = new UsernamePasswordAuthenticationToken(token.userUuid(), null, authorities);
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             } catch (JwtException | IllegalArgumentException ex) {
                 // invalid/expired/malformed token → stay unauthenticated

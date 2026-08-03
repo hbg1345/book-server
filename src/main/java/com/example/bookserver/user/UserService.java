@@ -38,12 +38,33 @@ public class UserService {
         user.setUserName(userName);
         user.setPhone(phone);
         user.setBirthDate(birthDate);
+        user.setRole(Role.USER);   // self-registration is always a plain user; ADMIN is granted, never requested
         userMapper.insert(user);
         return userUuid;
     }
 
     public boolean isUserIdTaken(String userId) {
         return userMapper.findByUserId(userId) != null;
+    }
+
+    /** The user's role, used to stamp the access token with the right authority. */
+    public Role getRole(UUID userUuid) {
+        return requireUser(userUuid).getRole();
+    }
+
+    /**
+     * Ensure an account with this login id exists and holds the ADMIN role, creating it
+     * if absent. Idempotent — safe to call on every startup. There is no public path to
+     * ADMIN (register always yields USER); this is the sole way an admin comes to exist.
+     */
+    public UUID ensureAdminAccount(String userId, String rawPassword, String userName,
+                                   String phone, LocalDate birthDate) {
+        User existing = userMapper.findByUserId(userId);
+        UUID userUuid = (existing != null)
+                ? existing.getUserUuid()
+                : register(userId, rawPassword, userName, phone, birthDate);
+        userMapper.updateRole(userUuid, Role.ADMIN);
+        return userUuid;
     }
 
     /**

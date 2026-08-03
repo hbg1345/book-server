@@ -16,11 +16,13 @@ import io.jsonwebtoken.security.Keys;
 
 /**
  * Issues and verifies stateless access tokens (JWT, HMAC-SHA256). The subject is
- * the user's uuid. Verification failures (bad signature, expired, malformed) surface
- * as {@link io.jsonwebtoken.JwtException}.
+ * the user's uuid and a {@code role} claim carries the authority. Verification failures
+ * (bad signature, expired, malformed) surface as {@link io.jsonwebtoken.JwtException}.
  */
 @Component
 public class JwtProvider {
+
+    private static final String ROLE_CLAIM = "role";
 
     private final SecretKey key;
     private final Duration accessTtl;
@@ -31,11 +33,16 @@ public class JwtProvider {
         this.accessTtl = accessTtl;
     }
 
-    /** Issue an access token for the given user, expiring after the configured TTL. */
-    public String issueAccessToken(UUID userUuid) {
+    /** The verified contents of an access token: who the caller is and their role. */
+    public record AccessToken(UUID userUuid, String role) {
+    }
+
+    /** Issue an access token for the given user + role, expiring after the configured TTL. */
+    public String issueAccessToken(UUID userUuid, String role) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(userUuid.toString())
+                .claim(ROLE_CLAIM, role)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessTtl)))
                 .signWith(key)
@@ -43,17 +50,16 @@ public class JwtProvider {
     }
 
     /**
-     * Verify the token's signature and expiry and return the user uuid (the subject).
+     * Verify the token's signature and expiry and return its user uuid and role.
      *
      * @throws io.jsonwebtoken.JwtException if the token is invalid, tampered, or expired
      */
-    public UUID parseUserId(String token) {
-        String subject = Jwts.parser()
+    public AccessToken parse(String token) {
+        var claims = Jwts.parser()
                 .verifyWith(key)
                 .build()
                 .parseSignedClaims(token)
-                .getPayload()
-                .getSubject();
-        return UUID.fromString(subject);
+                .getPayload();
+        return new AccessToken(UUID.fromString(claims.getSubject()), claims.get(ROLE_CLAIM, String.class));
     }
 }

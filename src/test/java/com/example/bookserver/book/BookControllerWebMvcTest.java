@@ -29,6 +29,7 @@ import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWit
 import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
 import static org.springframework.restdocs.payload.JsonFieldType.ARRAY;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -66,6 +67,7 @@ class BookControllerWebMvcTest {
         when(bookService.create(any(BookRequest.class))).thenReturn(uuid);
 
         mockMvc.perform(post("/api/books")
+                        .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(CREATE_BODY))
                 .andExpect(status().isCreated())
@@ -91,6 +93,7 @@ class BookControllerWebMvcTest {
     @Test
     void create_returns400WithFieldErrors_whenInvalid() throws Exception {
         mockMvc.perform(post("/api/books")
+                        .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"bookTitle":"","bookDescription":"x","price":0,
@@ -162,6 +165,7 @@ class BookControllerWebMvcTest {
         UUID bookUuid = UUID.randomUUID();
 
         mockMvc.perform(put("/api/books/{bookUuid}", bookUuid)
+                        .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(CREATE_BODY))
                 .andExpect(status().isOk());
@@ -177,6 +181,7 @@ class BookControllerWebMvcTest {
                 .when(bookService).update(eq(bookUuid), any(BookRequest.class));
 
         mockMvc.perform(put("/api/books/{bookUuid}", bookUuid)
+                        .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(CREATE_BODY))
                 .andExpect(status().isNotFound());
@@ -187,9 +192,42 @@ class BookControllerWebMvcTest {
     void delete_delegatesToService() throws Exception {
         UUID bookUuid = UUID.randomUUID();
 
-        mockMvc.perform(delete("/api/books/{bookUuid}", bookUuid))
+        mockMvc.perform(delete("/api/books/{bookUuid}", bookUuid)
+                        .with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk());
 
         verify(bookService).delete(bookUuid);
+    }
+
+    // writes are admin-only: an anonymous create is rejected with 401 and never reaches the service
+    @Test
+    void create_returns401_whenAnonymous() throws Exception {
+        mockMvc.perform(post("/api/books")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CREATE_BODY))
+                .andExpect(status().isUnauthorized());
+
+        verify(bookService, never()).create(any());
+    }
+
+    // writes are admin-only: an authenticated non-admin create is rejected with 403
+    @Test
+    void create_returns403_whenNotAdmin() throws Exception {
+        mockMvc.perform(post("/api/books")
+                        .with(user("bob").roles("USER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CREATE_BODY))
+                .andExpect(status().isForbidden());
+
+        verify(bookService, never()).create(any());
+    }
+
+    // reads stay public: listing books needs no authentication
+    @Test
+    void list_isPublic_whenAnonymous() throws Exception {
+        when(bookService.list()).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/books"))
+                .andExpect(status().isOk());
     }
 }
