@@ -9,14 +9,29 @@
 <body>
   <div id="swagger-ui"></div>
   <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" crossorigin></script>
+  <script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js" crossorigin></script>
   <script>
-    // Loads the OpenAPI spec generated from the RestDocs tests (copied next to this file by CI).
-    window.ui = SwaggerUIBundle({
-      url: './openapi3.yaml',
-      dom_id: '#swagger-ui',
-      deepLinking: true,
-      presets: [SwaggerUIBundle.presets.apis],
-    });
+    // The spec is generated from RestDocs tests (restdocs-api-spec) and copied next to this
+    // file by CI. That generator emits no security scheme, so we inject a JWT bearer scheme
+    // here at load time — that's what makes Swagger UI render the "Authorize" button.
+    fetch('./openapi3.yaml')
+      .then(function (res) { return res.text(); })
+      .then(function (text) {
+        var spec = jsyaml.load(text);
+        spec.components = spec.components || {};
+        spec.components.securitySchemes = Object.assign({}, spec.components.securitySchemes, {
+          bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }
+        });
+        // Apply the requirement globally; endpoints like /api/cart/** need it.
+        spec.security = [{ bearerAuth: [] }];
+        window.ui = SwaggerUIBundle({
+          spec: spec,
+          dom_id: '#swagger-ui',
+          deepLinking: true,
+          presets: [SwaggerUIBundle.presets.apis],
+          persistAuthorization: true,
+        });
+      });
   </script>
 </body>
 </html>
