@@ -105,6 +105,31 @@ public class PurchaseService {
         if (!CANCELLABLE.contains(current.getPurchaseState())) {
             throw new IllegalOrderStateException("Order can no longer be cancelled: " + current.getPurchaseState());
         }
+        restoreStockAndCancel(current);
+    }
+
+    /** Purchase uuids still awaiting payment since before {@code cutoff}. */
+    public List<UUID> findUnpaidOrdersBefore(LocalDateTime cutoff) {
+        return currentMapper.findPurchaseUuidsByStateOlderThan(PurchaseState.PAYMENT_PENDING, cutoff);
+    }
+
+    /**
+     * System-initiated expiry of one unpaid order: cancel it and release its reserved
+     * stock, reusing the normal cancel path. Re-reads the state under the transaction and
+     * no-ops unless it is still {@code PAYMENT_PENDING}, so an order paid (or cancelled)
+     * between the sweep's scan and this call is never double-processed.
+     */
+    @Transactional
+    public void expireUnpaidOrder(UUID purchaseUuid) {
+        PurchaseCurrent current = currentMapper.findByPurchaseUuid(purchaseUuid);
+        if (current == null || current.getPurchaseState() != PurchaseState.PAYMENT_PENDING) {
+            return;
+        }
+        restoreStockAndCancel(current);
+    }
+
+    /** Give back the reserved stock for every line and append a {@code CANCELLED} event. */
+    private void restoreStockAndCancel(PurchaseCurrent current) {
         for (PurchaseBookHistory book : bookHistoryMapper.findByHistoryUuid(current.getHistoryUuid())) {
             bookMapper.incrementInventory(book.getBookUuid(), book.getQuantity());
         }

@@ -48,6 +48,8 @@ class PurchaseControllerWebMvcTest {
 
     @MockitoBean
     private PurchaseService purchaseService;
+    @MockitoBean
+    private OrderExpiryScheduler orderExpiryScheduler;
 
     private static RequestPostProcessor asUser(UUID uuid) {
         return authentication(new UsernamePasswordAuthenticationToken(uuid, null, List.of()));
@@ -68,6 +70,7 @@ class PurchaseControllerWebMvcTest {
                                 fieldWithPath("purchaseUuid").description("UUID of the newly placed order"))));
 
         verify(purchaseService).placeOrder(user);
+        verify(orderExpiryScheduler).scheduleExpiry(purchase);   // per-order expiry is scheduled
     }
 
     // place without authentication -> 401; service never touched.
