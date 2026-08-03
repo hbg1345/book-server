@@ -56,11 +56,13 @@ dependencies {
 
 tasks.named('test') {
     outputs.dir snippetsDir
-    // Flyway builds the test schema too (single source of truth, no drift with prod),
-    // but we stop at V3 (schema + category tree + user role) so the heavy V4 catalog
-    // seed does not load in every test context. Tests reset rows between methods via
-    // @Sql("/reset.sql").
-    systemProperty 'spring.flyway.target', '3'
+    // Flyway builds the test schema too (single source of truth, no drift with prod).
+    // All migrations run, but the V3 catalog-seed migration is told to copy nothing via
+    // this flag, so the schema (incl. V4 user role) is built without the heavy load.
+    // We do NOT use spring.flyway.target to skip it: the seed is already applied as V3 in
+    // production, and reordering migrations would break Flyway validation there. Tests
+    // reset rows between methods via @Sql("/reset.sql").
+    systemProperty 'catalogSeed.skip', 'true'
     useJUnitPlatform {
         excludeTags 'benchmark'   // keep the heavy 1M-row benchmark out of the normal test run
     }
