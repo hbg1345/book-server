@@ -127,9 +127,10 @@ slim JRE stage runs it as a non-root user. Tests are **not** run during the imag
 ```
 
 Testcontainers starts a throwaway PostgreSQL, so Docker must be available. Tests get their
-schema from Flyway too (`spring.flyway.target=2`, so the heavy V3 catalog seed is skipped),
-keeping tests in sync with prod migrations. Per-test isolation is a `@Sql("/reset.sql")`
-truncate.
+schema from Flyway too — all migrations run, but the V3 catalog-seed migration copies
+nothing when the `catalogSeed.skip` system property is set (Gradle `test` task), so the
+schema is built without the heavy seed while staying in sync with prod migrations. Per-test
+isolation is a `@Sql("/reset.sql")` truncate.
 
 The heavy UUID v4-vs-v7 benchmark is excluded from the normal run:
 
@@ -155,3 +156,26 @@ The OpenAPI 3 spec is generated from the RestDocs tests, not hand-maintained:
    new Cloud Run revision. GCP auth is via Workload Identity Federation (no long-lived
    keys); the DB password and `JWT_SECRET` come from GCP Secret Manager. Cloud SQL is
    reached through the Postgres socket factory.
+
+## Scheduled maintenance
+
+Orders reserve stock when placed; unpaid ones past `order.payment-timeout` (default 30m)
+must be cancelled to release it. Because the service runs on Cloud Run with scale-to-zero,
+this is **not** an in-process timer (which wouldn't fire while no instance is up). Instead
+an internal endpoint does the sweep and Cloud Scheduler calls it on a cron:
+
+```
+POST /internal/orders/expire-unpaid
+X-Internal-Token: <internal.sweep-token>
+```
+
+The endpoint is outside the JWT surface and guarded by the shared `INTERNAL_SWEEP_TOKEN`
+secret (fails closed if unset). Example Cloud Scheduler job (every 5 minutes):
+
+```bash
+gcloud scheduler jobs create http expire-unpaid-orders \
+  --schedule="*/5 * * * *" \
+  --uri="https://<cloud-run-url>/internal/orders/expire-unpaid" \
+  --http-method=POST \
+  --headers="X-Internal-Token=<secret>"
+```

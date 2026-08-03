@@ -43,6 +43,7 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()          // login / refresh / logout
+                        .requestMatchers("/internal/**").permitAll()          // Cloud Scheduler jobs, guarded by a shared secret in the controller
                         .requestMatchers(HttpMethod.POST, "/api/users").permitAll()  // register
                         .requestMatchers("/api/users/**").authenticated()     // /users/me and below
                         .requestMatchers("/api/cart/**").authenticated()      // the caller's own cart
