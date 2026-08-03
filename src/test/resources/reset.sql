@@ -7,6 +7,7 @@ TRUNCATE
     purchase_book_history,
     purchase_current,
     purchase_history,
+    address,
     cart_item,
     book_author,
     book,
