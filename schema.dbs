@@ -84,6 +84,31 @@
 				<fk_column name="user_uuid" pk="user_uuid" />
 			</fk>
 		</table>
+		<table name="address" prior="addr" >
+			<column name="address_uuid" type="UUID" mandatory="y" />
+			<column name="user_uuid" type="UUID" mandatory="y" />
+			<column name="alias" type="VARCHAR" length="50" mandatory="y" />
+			<column name="recipient" type="VARCHAR" length="100" mandatory="y" />
+			<column name="phone" type="VARCHAR" length="20" mandatory="y" />
+			<column name="country" type="CHAR" length="2" mandatory="y" />
+			<column name="road_address" type="VARCHAR" length="255" mandatory="y" />
+			<column name="detail_address" type="VARCHAR" length="255" />
+			<column name="postal_code" type="VARCHAR" length="20" mandatory="y" />
+			<column name="is_default" type="BOOLEAN" mandatory="y" />
+			<column name="created_at" type="DATETIME" mandatory="y" />
+			<index name="pk_address" unique="PRIMARY_KEY" >
+				<column name="address_uuid" />
+			</index>
+			<index name="idx_address_user" unique="NORMAL" >
+				<column name="user_uuid" />
+			</index>
+			<index name="uq_address_one_default" unique="UNIQUE_KEY" >
+				<column name="user_uuid" />
+			</index>
+			<fk name="fk_address_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
+				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+		</table>
 		<table name="category" prior="cat" >
 			<column name="category_uuid" type="UUID" mandatory="y" />
 			<column name="parent_uuid" type="UUID" />
@@ -185,6 +210,7 @@
 	</schema>
 	<diagram_group name="Default" id="cbcc5be2-a937-48fd-9091-231b53f9a039" >
 		<diagram name="Default Diagram" id="68c731c4-2254-4bfa-87d7-dc7653a67353" show_relation="columns" >
+			<entity schema="Schema_" name="address" color="C1D8EE" x="304" y="589" />
 			<entity schema="Schema_" name="author" color="C1D8EE" x="969" y="57" />
 			<entity schema="Schema_" name="book" color="C1D8EE" x="513" y="57" />
 			<entity schema="Schema_" name="book_author" color="C1D8EE" x="760" y="57" />
