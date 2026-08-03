@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import com.example.bookserver.address.AddressNotFoundException;
 import com.example.bookserver.auth.InvalidRefreshTokenException;
 import com.example.bookserver.book.BookNotFoundException;
 import com.example.bookserver.cart.CartItemNotFoundException;
@@ -55,6 +56,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     /** Changing the quantity of a book that is not in the user's cart. */
     @ExceptionHandler(CartItemNotFoundException.class)
     public ProblemDetail handleCartItemNotFound(CartItemNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Operating on an address that does not exist or is not the caller's. */
+    @ExceptionHandler(AddressNotFoundException.class)
+    public ProblemDetail handleAddressNotFound(AddressNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
