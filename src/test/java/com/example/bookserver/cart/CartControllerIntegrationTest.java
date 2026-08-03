@@ -10,7 +10,13 @@ import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+
 import com.example.bookserver.TestcontainersConfiguration;
+import com.example.bookserver.book.BookService;
+import com.example.bookserver.book.dto.BookRequest;
 import com.jayway.jsonpath.JsonPath;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -33,6 +39,8 @@ class CartControllerIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+    @Autowired
+    private BookService bookService;
 
     private static final String REGISTER_BODY = """
             {"userId":"jdoe","password":"secret","userName":"Jane Doe",
@@ -41,11 +49,6 @@ class CartControllerIntegrationTest {
 
     private static final String LOGIN_BODY = """
             {"userId":"jdoe","password":"secret"}
-            """;
-
-    private static final String BOOK_BODY = """
-            {"bookTitle":"Clean Architecture","bookDescription":"desc","price":39.99,
-             "publishDate":"2021-01-01","publisher":"Wikibooks","inventory":10}
             """;
 
     /** Register + login, returning the access token. */
@@ -63,14 +66,15 @@ class CartControllerIntegrationTest {
         return JsonPath.read(login.getResponse().getContentAsString(), "$.accessToken");
     }
 
-    /** Create a book via the open catalog endpoint, returning its uuid. */
-    private String createBook() throws Exception {
-        MvcResult res = mockMvc.perform(post("/api/books")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(BOOK_BODY))
-                .andExpect(status().isCreated())
-                .andReturn();
-        return JsonPath.read(res.getResponse().getContentAsString(), "$.bookUuid");
+    /**
+     * Seed a book directly through the service. Catalog writes are admin-only over HTTP,
+     * but this test is about the cart, not catalog authorization — so it creates the book
+     * at the service layer rather than logging in as an admin.
+     */
+    private String createBook() {
+        return bookService.create(new BookRequest("Clean Architecture", "desc",
+                new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, List.of()))
+                .toString();
     }
 
     // Full round-trip: add -> list -> change quantity -> remove, all with the access token.

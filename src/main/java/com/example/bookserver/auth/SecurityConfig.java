@@ -20,9 +20,10 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 /**
  * Stateless JWT security. No sessions, no CSRF (the API carries auth in the
  * Authorization header, not an auto-attached cookie). Auth endpoints and the public
- * catalog are open; {@code /api/users/me/**} and {@code /api/cart/**} require a valid
- * access token. Book/author
- * writes stay open for now — they'll be locked down when roles are introduced.
+ * catalog <em>reads</em> are open; {@code /api/users/me/**}, {@code /api/cart/**} and
+ * {@code /api/orders/**} require a valid access token; catalog <em>writes</em>
+ * (POST/PUT/DELETE on books and authors) require the {@code ADMIN} role. Unauthenticated
+ * requests to a protected route get 401; authenticated-but-not-admin gets 403.
  */
 @Configuration
 @EnableWebSecurity
@@ -46,7 +47,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/users/**").authenticated()     // /users/me and below
                         .requestMatchers("/api/cart/**").authenticated()      // the caller's own cart
                         .requestMatchers("/api/orders/**").authenticated()    // the caller's own orders
-                        .anyRequest().permitAll())                            // catalog + everything else (for now)
+                        // catalog writes are admin-only; reads (GET) stay public via anyRequest below
+                        .requestMatchers(HttpMethod.POST, "/api/books/**", "/api/authors/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/books/**", "/api/authors/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/books/**", "/api/authors/**").hasRole("ADMIN")
+                        .anyRequest().permitAll())                            // catalog reads + everything else
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

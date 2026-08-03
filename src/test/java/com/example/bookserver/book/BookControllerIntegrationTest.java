@@ -1,5 +1,7 @@
 package com.example.bookserver.book;
 
+import java.time.LocalDate;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,6 +14,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.common.Uuids;
+import com.example.bookserver.user.UserService;
 import com.jayway.jsonpath.JsonPath;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -25,6 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * mapper -> real PostgreSQL (Testcontainers). Deliberately minimal — it proves the layers
  * are wired together and the book + author (M:N) mapping actually assembles end-to-end.
  * The exhaustive per-case checks live in the fast {@code BookControllerWebMvcTest} slice.
+ * Catalog writes are admin-only, so it drives them with a real ADMIN access token.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -36,10 +40,28 @@ class BookControllerIntegrationTest {
     private MockMvc mockMvc;
     @Autowired
     private AuthorMapper authorMapper;
+    @Autowired
+    private UserService userService;
+
+    /** Seed an ADMIN account and log in, returning its access token. */
+    private String adminToken() throws Exception {
+        userService.ensureAdminAccount("admin", "secret", "Admin",
+                "010-0000-0000", LocalDate.of(2000, 1, 1));
+        MvcResult login = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"userId":"admin","password":"secret"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        return JsonPath.read(login.getResponse().getContentAsString(), "$.accessToken");
+    }
 
     // create (with a linked author) -> get returns book + author -> delete -> 404.
     @Test
     void create_get_delete_roundTrip() throws Exception {
+        String token = adminToken();
+
         Author author = new Author(Uuids.newId(), "Robert Martin");
         authorMapper.insert(author);
 
@@ -50,6 +72,7 @@ class BookControllerIntegrationTest {
                 """.formatted(author.getAuthorUuid());
 
         MvcResult created = mockMvc.perform(post("/api/books")
+                        .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody))
                 .andExpect(status().isCreated())
@@ -68,7 +91,8 @@ class BookControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].bookUuid").value(bookUuid));
 
-        mockMvc.perform(delete("/api/books/{bookUuid}", bookUuid))
+        mockMvc.perform(delete("/api/books/{bookUuid}", bookUuid)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
 
         mockMvc.perform(get("/api/books/{bookUuid}", bookUuid))
