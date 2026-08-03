@@ -18,30 +18,32 @@ class JwtProviderTest {
 
     private final JwtProvider jwt = new JwtProvider(SECRET, Duration.ofHours(1));
 
-    // a freshly issued token verifies and yields back the same user uuid
+    // a freshly issued token verifies and yields back the same user uuid and role
     @Test
     void issue_then_parse_roundTrips() {
         UUID userUuid = UUID.randomUUID();
 
-        String token = jwt.issueAccessToken(userUuid);
+        String token = jwt.issueAccessToken(userUuid, "ADMIN");
 
-        assertThat(jwt.parseUserId(token)).isEqualTo(userUuid);
+        JwtProvider.AccessToken parsed = jwt.parse(token);
+        assertThat(parsed.userUuid()).isEqualTo(userUuid);
+        assertThat(parsed.role()).isEqualTo("ADMIN");
     }
 
     // a token signed with a different secret must not verify
     @Test
     void parse_throws_whenSignedWithDifferentSecret() {
         JwtProvider other = new JwtProvider("another-secret-that-is-long-enough-32b!!", Duration.ofHours(1));
-        String foreign = other.issueAccessToken(UUID.randomUUID());
+        String foreign = other.issueAccessToken(UUID.randomUUID(), "USER");
 
-        assertThatThrownBy(() -> jwt.parseUserId(foreign))
+        assertThatThrownBy(() -> jwt.parse(foreign))
                 .isInstanceOf(JwtException.class);
     }
 
     // a tampered token must not verify
     @Test
     void parse_throws_whenTampered() {
-        String token = jwt.issueAccessToken(UUID.randomUUID());
+        String token = jwt.issueAccessToken(UUID.randomUUID(), "USER");
         // Flip the FIRST character of the signature segment. The last base64url char of
         // a 32-byte HMAC carries padding bits, so some single-char flips (e.g. 'a'<->'b')
         // decode to the same signature and would not be detected — a flaky test. The
@@ -50,7 +52,7 @@ class JwtProviderTest {
         char c = token.charAt(sig);
         String tampered = token.substring(0, sig) + (c == 'A' ? 'B' : 'A') + token.substring(sig + 1);
 
-        assertThatThrownBy(() -> jwt.parseUserId(tampered))
+        assertThatThrownBy(() -> jwt.parse(tampered))
                 .isInstanceOf(JwtException.class);
     }
 
@@ -58,9 +60,9 @@ class JwtProviderTest {
     @Test
     void parse_throws_whenExpired() {
         JwtProvider shortLived = new JwtProvider(SECRET, Duration.ofSeconds(-1));
-        String expired = shortLived.issueAccessToken(UUID.randomUUID());
+        String expired = shortLived.issueAccessToken(UUID.randomUUID(), "USER");
 
-        assertThatThrownBy(() -> jwt.parseUserId(expired))
+        assertThatThrownBy(() -> jwt.parse(expired))
                 .isInstanceOf(ExpiredJwtException.class);
     }
 }

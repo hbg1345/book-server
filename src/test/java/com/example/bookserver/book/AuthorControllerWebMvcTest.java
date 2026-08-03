@@ -25,6 +25,7 @@ import static org.springframework.restdocs.payload.PayloadDocumentation.requestF
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
 import static org.springframework.restdocs.request.RequestDocumentation.parameterWithName;
 import static org.springframework.restdocs.request.RequestDocumentation.queryParameters;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -54,6 +55,7 @@ class AuthorControllerWebMvcTest {
         when(authorService.create("Robert Martin")).thenReturn(uuid);
 
         mockMvc.perform(post("/api/authors")
+                        .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"authorName":"Robert Martin"}
@@ -73,6 +75,7 @@ class AuthorControllerWebMvcTest {
     @Test
     void create_returns400_whenNameBlank() throws Exception {
         mockMvc.perform(post("/api/authors")
+                        .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"authorName":""}
@@ -111,5 +114,32 @@ class AuthorControllerWebMvcTest {
                 .andExpect(status().isBadRequest());
 
         verify(authorService, never()).searchByName(any());
+    }
+
+    // writes are admin-only: an anonymous create is rejected with 401
+    @Test
+    void create_returns401_whenAnonymous() throws Exception {
+        mockMvc.perform(post("/api/authors")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"authorName":"Robert Martin"}
+                                """))
+                .andExpect(status().isUnauthorized());
+
+        verify(authorService, never()).create(any());
+    }
+
+    // writes are admin-only: an authenticated non-admin create is rejected with 403
+    @Test
+    void create_returns403_whenNotAdmin() throws Exception {
+        mockMvc.perform(post("/api/authors")
+                        .with(user("bob").roles("USER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"authorName":"Robert Martin"}
+                                """))
+                .andExpect(status().isForbidden());
+
+        verify(authorService, never()).create(any());
     }
 }
