@@ -1,5 +1,7 @@
 package com.example.bookserver.purchase;
 
+import java.util.UUID;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -11,6 +13,7 @@ import com.example.bookserver.auth.JwtProvider;
 import com.example.bookserver.auth.SecurityConfig;
 import com.example.bookserver.common.GlobalExceptionHandler;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -32,6 +35,8 @@ class InternalOrderControllerWebMvcTest {
 
     @MockitoBean
     private UnpaidOrderSweeper unpaidOrderSweeper;
+    @MockitoBean
+    private PurchaseService purchaseService;
 
     // valid token -> 200 with the number of orders cancelled; the sweep runs
     @Test
@@ -61,5 +66,25 @@ class InternalOrderControllerWebMvcTest {
                 .andExpect(status().isForbidden());
 
         verify(unpaidOrderSweeper, never()).sweep();
+    }
+
+    // single-order expiry (Cloud Tasks target): valid token -> 200 and the order is expired
+    @Test
+    void expireOne_expiresOrder_whenTokenValid() throws Exception {
+        UUID purchaseUuid = UUID.randomUUID();
+
+        mockMvc.perform(post("/internal/orders/{id}/expire", purchaseUuid).header("X-Internal-Token", "s3cret"))
+                .andExpect(status().isOk());
+
+        verify(purchaseService).expireUnpaidOrder(purchaseUuid);
+    }
+
+    // single-order expiry: wrong token -> 403 and nothing is expired
+    @Test
+    void expireOne_returns403_whenTokenWrong() throws Exception {
+        mockMvc.perform(post("/internal/orders/{id}/expire", UUID.randomUUID()).header("X-Internal-Token", "nope"))
+                .andExpect(status().isForbidden());
+
+        verify(purchaseService, never()).expireUnpaidOrder(any());
     }
 }

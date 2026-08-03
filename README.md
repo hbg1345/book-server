@@ -157,25 +157,48 @@ The OpenAPI 3 spec is generated from the RestDocs tests, not hand-maintained:
    keys); the DB password and `JWT_SECRET` come from GCP Secret Manager. Cloud SQL is
    reached through the Postgres socket factory.
 
-## Scheduled maintenance
+## Order expiry (releasing reserved stock)
 
 Orders reserve stock when placed; unpaid ones past `order.payment-timeout` (default 30m)
-must be cancelled to release it. Because the service runs on Cloud Run with scale-to-zero,
-this is **not** an in-process timer (which wouldn't fire while no instance is up). Instead
-an internal endpoint does the sweep and Cloud Scheduler calls it on a cron:
+must be cancelled to release it. The service runs on Cloud Run with scale-to-zero, so this
+is **not** an in-process timer (which wouldn't fire while no instance is up). It uses a
+**hybrid** of two internal endpoints, both outside the JWT surface and guarded by the shared
+`INTERNAL_SWEEP_TOKEN` secret in an `X-Internal-Token` header (fails closed if unset):
+
+| Endpoint | Trigger | Role |
+|----------|---------|------|
+| `POST /internal/orders/{id}/expire` | Cloud Tasks, one task per order scheduled at placement | precise per-order expiry at ~exactly the timeout |
+| `POST /internal/orders/expire-unpaid` | Cloud Scheduler cron | safety net — catches orders whose task enqueue failed (the order DB commit and the enqueue are separate systems) |
+
+Both call the same idempotent expiry (`expireUnpaidOrder`), which no-ops unless the order is
+still `PAYMENT_PENDING` — so at-least-once delivery and an order paid before the task fires
+are both harmless.
+
+### Prod setup
+
+Per-order Cloud Tasks is enabled by config (off locally, so no GCP is needed for dev/tests):
 
 ```
-POST /internal/orders/expire-unpaid
-X-Internal-Token: <internal.sweep-token>
+ORDER_EXPIRY_CLOUD_TASKS_ENABLED=true
+GCP_PROJECT_ID=<project>
+ORDER_EXPIRY_QUEUE_LOCATION=asia-northeast3
+ORDER_EXPIRY_QUEUE=<queue-name>
+ORDER_EXPIRY_TARGET_BASE_URL=https://<cloud-run-url>
+INTERNAL_SWEEP_TOKEN=<secret>       # from Secret Manager; also on the two jobs below
 ```
 
-The endpoint is outside the JWT surface and guarded by the shared `INTERNAL_SWEEP_TOKEN`
-secret (fails closed if unset). Example Cloud Scheduler job (every 5 minutes):
+Create the queue once, and the safety-net Cloud Scheduler job:
 
 ```bash
+gcloud tasks queues create <queue-name> --location=asia-northeast3
+
 gcloud scheduler jobs create http expire-unpaid-orders \
-  --schedule="*/5 * * * *" \
+  --location=asia-northeast3 \
+  --schedule="*/10 * * * *" \
   --uri="https://<cloud-run-url>/internal/orders/expire-unpaid" \
   --http-method=POST \
   --headers="X-Internal-Token=<secret>"
 ```
+
+(With per-order tasks doing the precise work, the safety-net sweep can run infrequently,
+e.g. every 10 minutes.)
