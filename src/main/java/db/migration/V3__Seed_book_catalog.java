@@ -16,14 +16,22 @@ import org.postgresql.copy.CopyManager;
  * <p>Loaded with Postgres {@code COPY} for speed — roughly 103k books, 72k authors and
  * 137k book-author links. Like every migration it runs exactly once on a fresh database
  * (local {@code bootRun}/docker and the prod Cloud SQL instance) and is recorded in
- * {@code flyway_schema_history}. Runs after V2 so the {@code category} column exists; the
- * lightweight V3 role migration is ordered before it so tests can build the schema
- * (spring.flyway.target=3) without paying for this heavy seed.
+ * {@code flyway_schema_history}. Runs after V2 so the {@code category} column exists.
+ *
+ * <p>Tests skip the heavy load by setting the {@code catalogSeed.skip} JVM system property
+ * (see the Gradle {@code test} task): the migration still runs and is recorded, but copies
+ * nothing, so the schema is built without paying for the seed. The version is NOT changed
+ * to skip it — this migration is already applied in production as V3, and renumbering an
+ * applied migration would break Flyway validation on the deployed database.
  */
-public class V4__Seed_book_catalog extends BaseJavaMigration {
+public class V3__Seed_book_catalog extends BaseJavaMigration {
 
     @Override
     public void migrate(Context context) throws Exception {
+        if (Boolean.getBoolean("catalogSeed.skip")) {
+            return;   // tests build the schema without the heavy catalog load
+        }
+
         CopyManager copy = context.getConnection()
                 .unwrap(PGConnection.class)
                 .getCopyAPI();
