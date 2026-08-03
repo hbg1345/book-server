@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import com.example.bookserver.address.AddressNotFoundException;
+import com.example.bookserver.address.InvalidPostalCodeException;
 import com.example.bookserver.auth.InvalidRefreshTokenException;
 import com.example.bookserver.book.BookNotFoundException;
 import com.example.bookserver.cart.CartItemNotFoundException;
@@ -56,6 +58,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(CartItemNotFoundException.class)
     public ProblemDetail handleCartItemNotFound(CartItemNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Operating on an address that does not exist or is not the caller's. */
+    @ExceptionHandler(AddressNotFoundException.class)
+    public ProblemDetail handleAddressNotFound(AddressNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** A postal code that does not match its country's expected format. */
+    @ExceptionHandler(InvalidPostalCodeException.class)
+    public ProblemDetail handleInvalidPostalCode(InvalidPostalCodeException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     /** Acting on an order that does not exist for this user. */
