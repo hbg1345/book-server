@@ -11,4 +11,8 @@ public interface PaymentGateway {
     /** Confirm/capture a charge the frontend already authorized. Never throws on a decline —
      *  a declined card is a {@link ChargeResult} with {@code success=false}. */
     ChargeResult confirm(ChargeRequest request);
+
+    /** Refund a previously confirmed charge. A failure is a {@link RefundResult} with
+     *  {@code success=false}, not an exception. */
+    RefundResult refund(RefundRequest request);
 }

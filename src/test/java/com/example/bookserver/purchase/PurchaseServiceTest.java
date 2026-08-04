@@ -27,6 +27,7 @@ import com.example.bookserver.payment.Payment;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
 import com.example.bookserver.payment.PaymentMapper;
 import com.example.bookserver.payment.PaymentStatus;
+import com.example.bookserver.payment.RefundFailedException;
 import com.example.bookserver.purchase.dto.PayRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest.InlineAddress;
@@ -583,6 +584,121 @@ public class PurchaseServiceTest {
     @Test
     void prepare_throws_whenOrderMissing() {
         assertThatThrownBy(() -> purchaseService.prepare(Uuids.newId()))
+                .isInstanceOf(OrderNotFoundException.class);
+    }
+
+    // --- refund / return (#25 PR-2) ---
+
+    /** Drive an order to DELIVERED (paid, prepared, shipped, delivered). */
+    private UUID delivered(UUID user, UUID book) {
+        UUID p = placedAndPaid(user, book);
+        purchaseService.prepare(p);
+        purchaseService.ship(p, "TRACK");
+        purchaseService.deliver(p);
+        return p;
+    }
+
+    // cancelling a PAID (ORDERED) order refunds it: REFUND_REQUESTED -> REFUNDED, payment REFUNDED,
+    // stock restored.
+    @Test
+    void cancel_afterPayment_refunds_andRestoresStock() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = placedAndPaid(user, book);   // ORDERED, inventory 9
+
+        purchaseService.cancel(user, p);
+
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.REFUNDED);
+        assertThat(paymentMapper.findByPurchaseUuid(p).getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(10);   // stock given back
+        assertThat(gateway.refundCount()).isEqualTo(1);
+        assertThat(gateway.lastRefundedAmount()).isEqualByComparingTo("39.99");
+        // the timeline passed through REFUND_REQUESTED then REFUNDED
+        assertThat(historyMapper.findAllByPurchaseUuid(p))
+                .extracting(PurchaseHistory::getPurchaseState)
+                .containsSubsequence(PurchaseState.REFUND_REQUESTED, PurchaseState.REFUNDED);
+    }
+
+    // cancelling an UNPAID (PAYMENT_PENDING) order just releases stock -> CANCELLED, no refund.
+    @Test
+    void cancel_beforePayment_cancels_withoutRefund() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());   // PAYMENT_PENDING
+
+        purchaseService.cancel(user, p);
+
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.CANCELLED);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(10);
+        assertThat(gateway.refundCount()).isZero();
+    }
+
+    // a failed refund leaves the paid order unchanged (rolls back), so it can be retried.
+    @Test
+    void cancel_afterPayment_refundFailure_leavesOrderPaid() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = placedAndPaid(user, book);
+        gateway.setRefundSucceed(false);
+
+        assertThatThrownBy(() -> purchaseService.cancel(user, p))
+                .isInstanceOf(RefundFailedException.class);
+
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.ORDERED);
+        assertThat(paymentMapper.findByPurchaseUuid(p).getStatus()).isEqualTo(PaymentStatus.PAID);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(9);   // not restored
+    }
+
+    // returning a DELIVERED order refunds it and restores stock.
+    @Test
+    void returnOrder_afterDelivered_refunds_andRestoresStock() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = delivered(user, book);   // inventory 9
+
+        purchaseService.returnOrder(user, p);
+
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.REFUNDED);
+        assertThat(paymentMapper.findByPurchaseUuid(p).getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(10);
+        assertThat(gateway.refundCount()).isEqualTo(1);
+    }
+
+    // a CONFIRMED order can also be returned (refunded).
+    @Test
+    void returnOrder_afterConfirmed_refunds() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = delivered(user, book);
+        purchaseService.confirm(user, p);   // DELIVERED -> CONFIRMED
+
+        purchaseService.returnOrder(user, p);
+
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.REFUNDED);
+    }
+
+    // an order that has not been delivered cannot be returned.
+    @Test
+    void returnOrder_beforeDelivered_isRejected() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = placedAndPaid(user, book);   // ORDERED, not delivered
+
+        assertThatThrownBy(() -> purchaseService.returnOrder(user, p))
+                .isInstanceOf(IllegalOrderStateException.class);
+        assertThat(gateway.refundCount()).isZero();
+    }
+
+    // return is the buyer's action and is owner-scoped.
+    @Test
+    void returnOrder_isOwnerScoped() {
+        UUID owner = persistUser();
+        UUID intruder = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = delivered(owner, book);
+
+        assertThatThrownBy(() -> purchaseService.returnOrder(intruder, p))
                 .isInstanceOf(OrderNotFoundException.class);
     }
 }
