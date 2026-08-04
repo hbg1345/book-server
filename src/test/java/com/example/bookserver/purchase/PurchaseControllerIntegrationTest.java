@@ -17,6 +17,7 @@ import java.util.List;
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.book.BookService;
 import com.example.bookserver.book.dto.BookRequest;
+import com.example.bookserver.user.UserService;
 import com.jayway.jsonpath.JsonPath;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -40,6 +41,8 @@ class PurchaseControllerIntegrationTest {
     private MockMvc mockMvc;
     @Autowired
     private BookService bookService;
+    @Autowired
+    private UserService userService;
 
     private static final String REGISTER_BODY = """
             {"userId":"jdoe","password":"secret","userName":"Jane Doe",
@@ -179,6 +182,69 @@ class PurchaseControllerIntegrationTest {
                 .andExpect(jsonPath("$.deliveryAddress.recipient").value("Grace Hopper"))
                 .andExpect(jsonPath("$.deliveryAddress.roadAddress").value("1 Original Road"))
                 .andExpect(jsonPath("$.deliveryAddress.postalCode").value("06236"));
+    }
+
+    /** Seed an ADMIN account and log in, returning its access token. */
+    private String adminToken() throws Exception {
+        userService.ensureAdminAccount("admin", "secret", "Admin",
+                "010-0000-0000", LocalDate.of(2000, 1, 1));
+        MvcResult login = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"userId":"admin","password":"secret"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        return JsonPath.read(login.getResponse().getContentAsString(), "$.accessToken");
+    }
+
+    // full fulfillment lifecycle: buyer pays, admin prepares/ships/delivers, buyer confirms;
+    // the buyer cannot drive admin transitions, and the tracking number is captured and kept.
+    @Test
+    void fulfillment_lifecycle_endToEnd() throws Exception {
+        String buyer = registerAndLogin();
+        String admin = adminToken();
+        String book = createBook();
+
+        mockMvc.perform(post("/api/cart/items").header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bookUuid\":\"" + book + "\",\"quantity\":1}"))
+                .andExpect(status().isCreated());
+        MvcResult placed = mockMvc.perform(post("/api/orders").header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON).content(INLINE_ADDRESS_BODY))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String order = JsonPath.read(placed.getResponse().getContentAsString(), "$.purchaseUuid");
+        mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk());   // -> ORDERED
+
+        // the buyer cannot drive fulfillment transitions
+        mockMvc.perform(post("/api/orders/" + order + "/prepare").header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isForbidden());
+
+        // admin walks it through preparation -> shipping (with tracking) -> delivered
+        mockMvc.perform(post("/api/orders/" + order + "/prepare").header("Authorization", "Bearer " + admin))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/orders/" + order + "/ship").header("Authorization", "Bearer " + admin)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"trackingNumber\":\"1Z-TRACK-1\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/orders/" + order + "/deliver").header("Authorization", "Bearer " + admin))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + buyer))
+                .andExpect(jsonPath("$.purchaseState").value("DELIVERED"))
+                .andExpect(jsonPath("$.trackingNumber").value("1Z-TRACK-1"));
+
+        // buyer confirms receipt
+        mockMvc.perform(post("/api/orders/" + order + "/confirm").header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + buyer))
+                .andExpect(jsonPath("$.purchaseState").value("CONFIRMED"))
+                .andExpect(jsonPath("$.trackingNumber").value("1Z-TRACK-1"));   // preserved through transitions
+
+        // an illegal transition (delivering an already-confirmed order) -> 409
+        mockMvc.perform(post("/api/orders/" + order + "/deliver").header("Authorization", "Bearer " + admin))
+                .andExpect(status().isConflict());
     }
 
     // orders require authentication.
