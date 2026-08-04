@@ -129,12 +129,13 @@ public class PurchaseService {
         return currentMapper.findByUserUuid(userUuid);
     }
 
-    /** One order: its current header, the books in it, and the full state timeline. */
+    /** One order: its current header, its delivery address, the books in it, and the full state timeline. */
     public OrderDetail getOrder(UUID userUuid, UUID purchaseUuid) {
         PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
+        OrderAddress delivery = orderAddressMapper.findByPurchaseUuid(purchaseUuid);
         List<OrderBookItem> items = bookHistoryMapper.findItemsWithBookByHistoryUuid(current.getHistoryUuid());
         List<PurchaseHistory> history = historyMapper.findAllByPurchaseUuid(purchaseUuid);
-        return new OrderDetail(current, items, history);
+        return new OrderDetail(current, delivery, items, history);
     }
 
     /** Cancel an order (only before it is prepared) and return its reserved stock. */

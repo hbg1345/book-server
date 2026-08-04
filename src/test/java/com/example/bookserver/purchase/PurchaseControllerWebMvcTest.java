@@ -10,11 +10,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.restdocs.test.autoconfigure.AutoConfigureRestDocs;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.restdocs.payload.JsonFieldType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import com.example.bookserver.address.AddressNotFoundException;
 import com.example.bookserver.auth.JwtProvider;
 import com.example.bookserver.auth.SecurityConfig;
 import com.example.bookserver.common.GlobalExceptionHandler;
@@ -27,6 +29,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper.document;
 import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath;
+import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -74,6 +77,15 @@ class PurchaseControllerWebMvcTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.purchaseUuid").value(purchase.toString()))
                 .andDo(document("order-place",
+                        requestFields(
+                                fieldWithPath("addressUuid").type(JsonFieldType.STRING).optional().description("Saved address id to ship to; omit when supplying an inline address"),
+                                fieldWithPath("address").type(JsonFieldType.OBJECT).optional().description("One-off delivery address; omit when using addressUuid"),
+                                fieldWithPath("address.recipient").optional().description("Recipient name"),
+                                fieldWithPath("address.phone").optional().description("Recipient phone"),
+                                fieldWithPath("address.country").optional().description("ISO 3166-1 alpha-2 country code"),
+                                fieldWithPath("address.roadAddress").optional().description("Road-name address line"),
+                                fieldWithPath("address.detailAddress").optional().description("Unit/floor; optional"),
+                                fieldWithPath("address.postalCode").optional().description("Postal code (format validated per country)")),
                         responseFields(
                                 fieldWithPath("purchaseUuid").description("UUID of the newly placed order"))));
 
@@ -88,6 +100,31 @@ class PurchaseControllerWebMvcTest {
                         .contentType(MediaType.APPLICATION_JSON).content(INLINE_ADDRESS_BODY))
                 .andExpect(status().isUnauthorized());
         verify(purchaseService, never()).placeOrder(any(), any());
+    }
+
+    // place with neither addressUuid nor an inline address -> 400 (validation), service untouched.
+    @Test
+    void place_returns400_whenNoAddress() throws Exception {
+        UUID user = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/orders").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+        verify(purchaseService, never()).placeOrder(any(), any());
+    }
+
+    // place naming an address the caller does not own -> 404.
+    @Test
+    void place_returns404_whenAddressNotOwned() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID addressUuid = UUID.randomUUID();
+        when(purchaseService.placeOrder(eq(user), any()))
+                .thenThrow(new AddressNotFoundException(addressUuid));
+
+        mockMvc.perform(post("/api/orders").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"addressUuid\":\"" + addressUuid + "\"}"))
+                .andExpect(status().isNotFound());
     }
 
     // place from an empty cart -> 400.
@@ -145,6 +182,8 @@ class PurchaseControllerWebMvcTest {
         OrderDetail detail = new OrderDetail(
                 new PurchaseCurrent(purchase, user, UUID.randomUUID(), PurchaseState.PAYMENT_PENDING,
                         new BigDecimal("79.98"), at),
+                new OrderAddress(purchase, "Jane Doe", "010-1234-5678", "KR",
+                        "123 Sejong-daero", "5F", "06236", at),
                 List.of(new OrderBookItem(book, "Clean Architecture", 2, new BigDecimal("39.99"))),
                 List.of(new PurchaseHistory(UUID.randomUUID(), purchase, user, PurchaseState.PAYMENT_PENDING,
                         new BigDecimal("79.98"), at)));
@@ -154,6 +193,8 @@ class PurchaseControllerWebMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.purchaseUuid").value(purchase.toString()))
                 .andExpect(jsonPath("$.purchaseState").value("PAYMENT_PENDING"))
+                .andExpect(jsonPath("$.deliveryAddress.recipient").value("Jane Doe"))
+                .andExpect(jsonPath("$.deliveryAddress.postalCode").value("06236"))
                 .andExpect(jsonPath("$.items[0].bookTitle").value("Clean Architecture"))
                 .andExpect(jsonPath("$.items[0].lineTotal").value(79.98))
                 .andExpect(jsonPath("$.history[0].purchaseState").value("PAYMENT_PENDING"))
@@ -163,6 +204,12 @@ class PurchaseControllerWebMvcTest {
                                 fieldWithPath("purchaseState").description("Current order state"),
                                 fieldWithPath("price").description("Order total"),
                                 fieldWithPath("updatedAt").description("When the current state took effect"),
+                                fieldWithPath("deliveryAddress.recipient").description("Recipient name (snapshot)"),
+                                fieldWithPath("deliveryAddress.phone").description("Recipient phone (snapshot)"),
+                                fieldWithPath("deliveryAddress.country").description("ISO 3166-1 alpha-2 country code"),
+                                fieldWithPath("deliveryAddress.roadAddress").description("Road-name address line (snapshot)"),
+                                fieldWithPath("deliveryAddress.detailAddress").description("Unit/floor (snapshot); may be null"),
+                                fieldWithPath("deliveryAddress.postalCode").description("Postal code (snapshot)"),
                                 fieldWithPath("items[].bookUuid").description("Book UUID"),
                                 fieldWithPath("items[].bookTitle").description("Book title"),
                                 fieldWithPath("items[].quantity").description("Quantity ordered"),

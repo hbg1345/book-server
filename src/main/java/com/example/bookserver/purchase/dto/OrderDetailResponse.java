@@ -8,12 +8,13 @@ import java.util.UUID;
 import com.example.bookserver.purchase.OrderDetail;
 import com.example.bookserver.purchase.PurchaseState;
 
-/** Full order view: current header, its books, and the state timeline. */
+/** Full order view: current header, its delivery address, its books, and the state timeline. */
 public record OrderDetailResponse(
         UUID purchaseUuid,
         PurchaseState purchaseState,
         BigDecimal price,
         LocalDateTime updatedAt,
+        DeliveryAddressResponse deliveryAddress,
         List<OrderItemResponse> items,
         List<OrderStateEventResponse> history) {
 
@@ -24,6 +25,7 @@ public record OrderDetailResponse(
                 current.getPurchaseState(),
                 current.getPrice(),
                 current.getUpdatedAt(),
+                DeliveryAddressResponse.from(detail.delivery()),
                 detail.items().stream().map(OrderItemResponse::from).toList(),
                 detail.history().stream().map(OrderStateEventResponse::from).toList());
     }
