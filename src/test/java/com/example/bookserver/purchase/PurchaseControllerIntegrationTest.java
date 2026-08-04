@@ -1,11 +1,13 @@
 package com.example.bookserver.purchase;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -17,12 +19,16 @@ import java.util.List;
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.book.BookService;
 import com.example.bookserver.book.dto.BookRequest;
+import com.example.bookserver.payment.ChargeResult;
+import com.example.bookserver.payment.PaymentGateway;
 import com.example.bookserver.payment.PaymentMapper;
 import com.example.bookserver.payment.PaymentStatus;
 import com.example.bookserver.user.UserService;
 import com.jayway.jsonpath.JsonPath;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -49,6 +55,14 @@ class PurchaseControllerIntegrationTest {
     private UserService userService;
     @Autowired
     private PaymentMapper paymentMapper;
+    // Override the declining prod stub with a gateway that approves, so the pay flow can complete.
+    @MockitoBean
+    private PaymentGateway paymentGateway;
+
+    @BeforeEach
+    void approveCharges() {
+        when(paymentGateway.confirm(any())).thenReturn(ChargeResult.paid("txn_it"));
+    }
 
     private static final String REGISTER_BODY = """
             {"userId":"jdoe","password":"secret","userName":"Jane Doe",
