@@ -103,13 +103,32 @@ class PurchaseControllerWebMvcTest {
     }
 
     // place with neither addressUuid nor an inline address -> 400 (validation), service untouched.
+    // The cross-field error is reported under a real field key ("address"), not an internal
+    // accessor name like "exactlyOneAddressSource".
     @Test
     void place_returns400_whenNoAddress() throws Exception {
         UUID user = UUID.randomUUID();
 
         mockMvc.perform(post("/api/orders").with(asUser(user))
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.address").exists())
+                .andExpect(jsonPath("$.errors.exactlyOneAddressSource").doesNotExist());
+        verify(purchaseService, never()).placeOrder(any(), any());
+    }
+
+    // an inline field longer than its column limit -> 400 (validation), not a 500 DB overflow.
+    @Test
+    void place_returns400_whenFieldTooLong() throws Exception {
+        UUID user = UUID.randomUUID();
+        String longRoad = "a".repeat(256);   // road_address is VARCHAR(255)
+        String body = "{\"address\":{\"recipient\":\"Jane\",\"phone\":\"010-1\",\"country\":\"KR\","
+                + "\"roadAddress\":\"" + longRoad + "\",\"postalCode\":\"06236\"}}";
+
+        mockMvc.perform(post("/api/orders").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors['address.roadAddress']").exists());
         verify(purchaseService, never()).placeOrder(any(), any());
     }
 
