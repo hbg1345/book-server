@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<project name="physical_schema.dbs" database="PostgreSQL" id="1a486b3c-bc6c-4f2b-8b72-4e7d1f8371a3" >
+	<schema name="public" catalogname="bookdb" >
+		<comment><![CDATA[standard public schema]]></comment>
+		<table name="address" spec="" >
+			<column name="address_uuid" type="uuid" mandatory="y" />
+			<column name="user_uuid" type="uuid" mandatory="y" />
+			<column name="alias" type="varchar" length="50" mandatory="y" />
+			<column name="recipient" type="varchar" length="100" mandatory="y" />
+			<column name="phone" type="varchar" length="20" mandatory="y" />
+			<column name="country" type="char" length="2" mandatory="y" >
+				<defo><![CDATA['KR'::bpchar]]></defo>
+			</column>
+			<column name="road_address" type="varchar" length="255" mandatory="y" />
+			<column name="detail_address" type="varchar" length="255" />
+			<column name="postal_code" type="varchar" length="20" mandatory="y" />
+			<column name="is_default" type="boolean" mandatory="y" >
+				<defo><![CDATA[false]]></defo>
+			</column>
+			<column name="created_at" type="timestamp" mandatory="y" >
+				<defo><![CDATA[CURRENT_TIMESTAMP]]></defo>
+			</column>
+			<index name="address_pkey" unique="PRIMARY_KEY" >
+				<column name="address_uuid" />
+			</index>
+			<index name="idx_address_user" unique="NORMAL" spec="USING  btree" >
+				<column name="user_uuid" />
+			</index>
+			<index name="uq_address_one_default" unique="UNIQUE_INDEX" spec="USING  btree" options="WHERE is_default" >
+				<column name="user_uuid" />
+			</index>
+			<fk name="address_user_uuid_fkey" to_schema="bookdb.public" to_table="book_user" delete_action="cascade" options="" >
+				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+		</table>
+		<table name="author" spec="" >
+			<column name="author_uuid" type="uuid" mandatory="y" />
+			<column name="author_name" type="text" mandatory="y" />
+			<index name="author_pkey" unique="PRIMARY_KEY" >
+				<column name="author_uuid" />
+			</index>
+		</table>
+		<table name="book" spec="" >
+			<column name="book_uuid" type="uuid" mandatory="y" />
+			<column name="book_title" type="varchar" length="255" mandatory="y" />
+			<column name="book_description" type="text" />
+			<column name="price" type="numeric" length="10" decimal="2" mandatory="y" />
+			<column name="publish_date" type="date" mandatory="y" />
+			<column name="publisher" type="varchar" length="100" mandatory="y" />
+			<column name="inventory" type="integer" mandatory="y" />
+			<column name="category_uuid" type="uuid" />
+			<index name="book_pkey" unique="PRIMARY_KEY" >
+				<column name="book_uuid" />
+			</index>
+			<index name="idx_book_category" unique="NORMAL" spec="USING  btree" >
+				<column name="category_uuid" />
+			</index>
+			<fk name="book_category_uuid_fkey" to_schema="bookdb.public" to_table="category" delete_action="setNull" options="" >
+				<fk_column name="category_uuid" pk="category_uuid" />
+			</fk>
+		</table>
+		<table name="book_author" spec="" >
+			<column name="book_uuid" type="uuid" mandatory="y" />
+			<column name="author_uuid" type="uuid" mandatory="y" />
+			<index name="book_author_pkey" unique="PRIMARY_KEY" >
+				<column name="book_uuid" />
+				<column name="author_uuid" />
+			</index>
+			<fk name="book_author_book_uuid_fkey" to_schema="bookdb.public" to_table="book" delete_action="cascade" options="" >
+				<fk_column name="book_uuid" pk="book_uuid" />
+			</fk>
+			<fk name="book_author_author_uuid_fkey" to_schema="bookdb.public" to_table="author" delete_action="cascade" options="" >
+				<fk_column name="author_uuid" pk="author_uuid" />
+			</fk>
+		</table>
+		<table name="book_user" spec="" >
+			<column name="user_uuid" type="uuid" mandatory="y" />
+			<column name="user_id" type="varchar" length="100" mandatory="y" />
+			<column name="user_password" type="varchar" length="255" mandatory="y" />
+			<column name="user_name" type="varchar" length="100" mandatory="y" />
+			<column name="phone" type="varchar" length="20" mandatory="y" />
+			<column name="birth_date" type="date" mandatory="y" />
+			<column name="created_at" type="timestamp" mandatory="y" >
+				<defo><![CDATA[CURRENT_TIMESTAMP]]></defo>
+			</column>
+			<column name="role" type="varchar" length="20" mandatory="y" >
+				<defo><![CDATA['USER'::character varying]]></defo>
+			</column>
+			<index name="book_user_pkey" unique="PRIMARY_KEY" >
+				<column name="user_uuid" />
+			</index>
+			<index name="book_user_user_id_key" unique="UNIQUE_KEY" >
+				<column name="user_id" />
+			</index>
+			<constraint name="book_user_role_check" type="CHECK" options="" >
+				<string><![CDATA[role)::text = ANY ((ARRAY['USER'::character varying, 'ADMIN'::character varying])::text[]]]></string>
+			</constraint>
+		</table>
+		<table name="cart_item" spec="" >
+			<column name="user_uuid" type="uuid" mandatory="y" />
+			<column name="book_uuid" type="uuid" mandatory="y" />
+			<column name="quantity" type="integer" mandatory="y" />
+			<column name="created_at" type="timestamp" mandatory="y" >
+				<defo><![CDATA[CURRENT_TIMESTAMP]]></defo>
+			</column>
+			<index name="cart_item_pkey" unique="PRIMARY_KEY" >
+				<column name="user_uuid" />
+				<column name="book_uuid" />
+			</index>
+			<fk name="cart_item_user_uuid_fkey" to_schema="bookdb.public" to_table="book_user" delete_action="cascade" options="" >
+				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+			<fk name="cart_item_book_uuid_fkey" to_schema="bookdb.public" to_table="book" delete_action="cascade" options="" >
+				<fk_column name="book_uuid" pk="book_uuid" />
+			</fk>
+		</table>
+		<table name="category" spec="" >
+			<column name="category_uuid" type="uuid" mandatory="y" />
+			<column name="parent_uuid" type="uuid" />
+			<column name="name" type="varchar" length="255" mandatory="y" />
+			<index name="category_pkey" unique="PRIMARY_KEY" >
+				<column name="category_uuid" />
+			</index>
+			<index name="uq_category_root_name" unique="UNIQUE_INDEX" spec="USING  btree" options="WHERE (parent_uuid IS NULL)" >
+				<column name="name" />
+			</index>
+			<index name="uq_category_child_name" unique="UNIQUE_INDEX" spec="USING  btree" options="WHERE (parent_uuid IS NOT NULL)" >
+				<column name="parent_uuid" />
+				<column name="name" />
+			</index>
+			<index name="idx_category_parent" unique="NORMAL" spec="USING  btree" >
+				<column name="parent_uuid" />
+			</index>
+			<fk name="category_parent_uuid_fkey" to_schema="bookdb.public" to_table="category" delete_action="cascade" options="" >
+				<fk_column name="parent_uuid" pk="category_uuid" />
+			</fk>
+		</table>
+		<table name="flyway_schema_history" spec="" >
+			<column name="installed_rank" type="integer" mandatory="y" />
+			<column name="version" type="varchar" length="50" />
+			<column name="description" type="varchar" length="200" mandatory="y" />
+			<column name="type" type="varchar" length="20" mandatory="y" />
+			<column name="script" type="varchar" length="1000" mandatory="y" />
+			<column name="checksum" type="integer" />
+			<column name="installed_by" type="varchar" length="100" mandatory="y" />
+			<column name="installed_on" type="timestamp" mandatory="y" >
+				<defo><![CDATA[now()]]></defo>
+			</column>
+			<column name="execution_time" type="integer" mandatory="y" />
+			<column name="success" type="boolean" mandatory="y" />
+			<index name="flyway_schema_history_pk" unique="PRIMARY_KEY" >
+				<column name="installed_rank" />
+			</index>
+			<index name="flyway_schema_history_s_idx" unique="NORMAL" spec="USING  btree" >
+				<column name="success" />
+			</index>
+		</table>
+		<table name="purchase_book_history" spec="" >
+			<column name="history_uuid" type="uuid" mandatory="y" />
+			<column name="book_uuid" type="uuid" mandatory="y" />
+			<column name="purchase_state" type="varchar" length="20" mandatory="y" />
+			<column name="quantity" type="integer" mandatory="y" />
+			<column name="price" type="numeric" length="10" decimal="2" mandatory="y" />
+			<column name="updated_at" type="timestamp" mandatory="y" />
+			<index name="purchase_book_history_pkey" unique="PRIMARY_KEY" >
+				<column name="history_uuid" />
+				<column name="book_uuid" />
+			</index>
+			<constraint name="purchase_book_history_purchase_state_check" type="CHECK" options="" >
+				<string><![CDATA[purchase_state)::text = ANY ((ARRAY['PAYMENT_PENDING'::character varying, 'ORDERED'::character varying, 'PREPARING'::character varying, 'SHIPPING'::character varying, 'DELIVERED'::character varying, 'CONFIRMED'::character varying, 'CANCEL_REQUESTED'::character varying, 'CANCELLED'::character varying, 'REFUND_REQUESTED'::character varying, 'REFUNDED'::character varying])::text[]]]></string>
+			</constraint>
+			<fk name="purchase_book_history_history_uuid_fkey" to_schema="bookdb.public" to_table="purchase_history" delete_action="cascade" options="" >
+				<fk_column name="history_uuid" pk="history_uuid" />
+			</fk>
+			<fk name="purchase_book_history_book_uuid_fkey" to_schema="bookdb.public" to_table="book" options="" >
+				<fk_column name="book_uuid" pk="book_uuid" />
+			</fk>
+		</table>
+		<table name="purchase_current" spec="" >
+			<column name="purchase_uuid" type="uuid" mandatory="y" />
+			<column name="user_uuid" type="uuid" mandatory="y" />
+			<column name="history_uuid" type="uuid" mandatory="y" />
+			<column name="purchase_state" type="varchar" length="20" mandatory="y" />
+			<column name="price" type="numeric" length="10" decimal="2" mandatory="y" />
+			<column name="updated_at" type="timestamp" mandatory="y" />
+			<index name="purchase_current_pkey" unique="PRIMARY_KEY" >
+				<column name="purchase_uuid" />
+			</index>
+			<index name="idx_purchase_current_user" unique="NORMAL" spec="USING  btree" >
+				<column name="user_uuid" />
+			</index>
+			<constraint name="purchase_current_purchase_state_check" type="CHECK" options="" >
+				<string><![CDATA[purchase_state)::text = ANY ((ARRAY['PAYMENT_PENDING'::character varying, 'ORDERED'::character varying, 'PREPARING'::character varying, 'SHIPPING'::character varying, 'DELIVERED'::character varying, 'CONFIRMED'::character varying, 'CANCEL_REQUESTED'::character varying, 'CANCELLED'::character varying, 'REFUND_REQUESTED'::character varying, 'REFUNDED'::character varying])::text[]]]></string>
+			</constraint>
+			<fk name="purchase_current_user_uuid_fkey" to_schema="bookdb.public" to_table="book_user" delete_action="cascade" options="" >
+				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+			<fk name="purchase_current_history_uuid_fkey" to_schema="bookdb.public" to_table="purchase_history" delete_action="cascade" options="" >
+				<fk_column name="history_uuid" pk="history_uuid" />
+			</fk>
+		</table>
+		<table name="purchase_history" spec="" >
+			<column name="history_uuid" type="uuid" mandatory="y" />
+			<column name="purchase_uuid" type="uuid" mandatory="y" />
+			<column name="user_uuid" type="uuid" mandatory="y" />
+			<column name="purchase_state" type="varchar" length="20" mandatory="y" />
+			<column name="price" type="numeric" length="10" decimal="2" mandatory="y" />
+			<column name="updated_at" type="timestamp" mandatory="y" />
+			<index name="purchase_history_pkey" unique="PRIMARY_KEY" >
+				<column name="history_uuid" />
+			</index>
+			<constraint name="purchase_history_purchase_state_check" type="CHECK" options="" >
+				<string><![CDATA[purchase_state)::text = ANY ((ARRAY['PAYMENT_PENDING'::character varying, 'ORDERED'::character varying, 'PREPARING'::character varying, 'SHIPPING'::character varying, 'DELIVERED'::character varying, 'CONFIRMED'::character varying, 'CANCEL_REQUESTED'::character varying, 'CANCELLED'::character varying, 'REFUND_REQUESTED'::character varying, 'REFUNDED'::character varying])::text[]]]></string>
+			</constraint>
+			<fk name="purchase_history_user_uuid_fkey" to_schema="bookdb.public" to_table="book_user" delete_action="cascade" options="" >
+				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+		</table>
+		<table name="refresh_token" spec="" >
+			<column name="token_id" type="uuid" mandatory="y" />
+			<column name="family_id" type="uuid" mandatory="y" />
+			<column name="user_uuid" type="uuid" mandatory="y" />
+			<column name="token_hash" type="varchar" length="64" mandatory="y" />
+			<column name="used" type="boolean" mandatory="y" >
+				<defo><![CDATA[false]]></defo>
+			</column>
+			<column name="revoked" type="boolean" mandatory="y" >
+				<defo><![CDATA[false]]></defo>
+			</column>
+			<column name="expires_at" type="timestamp" mandatory="y" />
+			<column name="created_at" type="timestamp" mandatory="y" >
+				<defo><![CDATA[CURRENT_TIMESTAMP]]></defo>
+			</column>
+			<index name="refresh_token_pkey" unique="PRIMARY_KEY" >
+				<column name="token_id" />
+			</index>
+			<index name="refresh_token_token_hash_key" unique="UNIQUE_KEY" >
+				<column name="token_hash" />
+			</index>
+			<index name="idx_refresh_token_family" unique="NORMAL" spec="USING  btree" >
+				<column name="family_id" />
+			</index>
+			<fk name="refresh_token_user_uuid_fkey" to_schema="bookdb.public" to_table="book_user" delete_action="cascade" options="" >
+				<fk_column name="user_uuid" pk="user_uuid" />
+			</fk>
+		</table>
+	</schema>
+	<diagram_group name="Default" id="52ed4e02-14e0-48ac-bd39-17d71b602f86" >
+		<diagram name="Default Diagram" id="9e2075f1-b31e-436a-aedd-e75b121cd6a5" show_relation="columns" >
+			<entity schema="bookdb.public" name="address" color="BED3F4" x="304" y="589" />
+			<entity schema="bookdb.public" name="author" color="C7F4BE" x="969" y="57" />
+			<entity schema="bookdb.public" name="book" color="C7F4BE" x="513" y="57" />
+			<entity schema="bookdb.public" name="book_author" color="C7F4BE" x="760" y="57" />
+			<entity schema="bookdb.public" name="book_user" color="BED3F4" x="57" y="57" />
+			<entity schema="bookdb.public" name="cart_item" color="C7F4BE" x="304" y="57" />
+			<entity schema="bookdb.public" name="category" color="C7F4BE" x="817" y="171" />
+			<entity schema="bookdb.public" name="flyway_schema_history" color="3986C1" x="969" y="589" />
+			<entity schema="bookdb.public" name="purchase_book_history" color="BED3F4" x="741" y="323" />
+			<entity schema="bookdb.public" name="purchase_current" color="BED3F4" x="152" y="323" />
+			<entity schema="bookdb.public" name="purchase_history" color="BED3F4" x="437" y="323" />
+			<entity schema="bookdb.public" name="refresh_token" color="BED3F4" x="57" y="589" />
+			<callout x="266" y="57" pointer="Round" >
+				<comment><![CDATA[- 다이어그램을 우클릭하여 새 테이블을 생성합니다.
+- 테이블 헤더를 더블 클릭하여 편집할 수 있습니다.
+- 여러 다이어그램을 만들어 스키마를 더 잘 이해하기 위함.
+- 설계를 모델 파일에 저장하고, '스키마 / 데이터베이스로 설정'에서 배포합니다.]]></comment>
+			</callout>
+		</diagram>
+	</diagram_group>
+</project>
