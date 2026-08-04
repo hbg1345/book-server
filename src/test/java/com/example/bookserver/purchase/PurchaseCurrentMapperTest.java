@@ -130,6 +130,24 @@ public class PurchaseCurrentMapperTest {
                 .containsExactly(newer, older);
     }
 
+    // Verifies: the tracking number is set by its dedicated UPDATE and — crucially — is
+    // preserved by a later state-change upsert (it is not part of the upsert's DO UPDATE SET,
+    // so DELIVERED/CONFIRMED transitions must never null it).
+    @Test
+    void trackingNumber_isSet_andSurvivesLaterStateChange() {
+        UUID userUuid = persistUser();
+        UUID purchaseUuid = Uuids.newId();
+        applyState(purchaseUuid, userUuid, PurchaseState.SHIPPING, BASE);
+
+        purchaseCurrentMapper.updateTrackingNumber(purchaseUuid, "1Z999AA10123456784");
+        assertThat(purchaseCurrentMapper.findByPurchaseUuid(purchaseUuid).getTrackingNumber())
+                .isEqualTo("1Z999AA10123456784");
+
+        applyState(purchaseUuid, userUuid, PurchaseState.DELIVERED, BASE.plusDays(1));   // later transition
+        assertThat(purchaseCurrentMapper.findByPurchaseUuid(purchaseUuid).getTrackingNumber())
+                .isEqualTo("1Z999AA10123456784");   // still there
+    }
+
     // Verifies: findByPurchaseUuid returns null for an unknown purchase.
     @Test
     void findByPurchaseUuid_returnsNull_whenAbsent() {
