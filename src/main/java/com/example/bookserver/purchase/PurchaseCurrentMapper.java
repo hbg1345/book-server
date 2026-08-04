@@ -9,6 +9,7 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface PurchaseCurrentMapper {
@@ -53,6 +54,12 @@ public interface PurchaseCurrentMapper {
             """)
     List<UUID> findPurchaseUuidsByStateOlderThan(@Param("state") PurchaseState state,
                                                  @Param("cutoff") LocalDateTime cutoff);
+
+    // set the shipment tracking number on the SHIPPING transition. Kept out of upsert() on
+    // purpose, so later state-change upserts do not overwrite it back to NULL.
+    @Update("UPDATE purchase_current SET tracking_number = #{trackingNumber} WHERE purchase_uuid = #{purchaseUuid}")
+    void updateTrackingNumber(@Param("purchaseUuid") UUID purchaseUuid,
+                              @Param("trackingNumber") String trackingNumber);
 
     // remove a purchase's current row (e.g. the order is deleted)
     @Delete("DELETE FROM purchase_current WHERE purchase_uuid = #{purchaseUuid}")

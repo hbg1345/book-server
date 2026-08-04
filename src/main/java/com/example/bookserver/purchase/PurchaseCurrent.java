@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -18,7 +17,6 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@AllArgsConstructor
 public class PurchaseCurrent {
 
     private UUID purchaseUuid;      // PK: stable id of the purchase
@@ -27,4 +25,17 @@ public class PurchaseCurrent {
     private PurchaseState purchaseState;
     private BigDecimal price;       // order total snapshot (latest)
     private LocalDateTime updatedAt;
+    private String trackingNumber;  // set once the order ships; not part of a state event (see V7)
+
+    // Built from the six state-event fields; trackingNumber is set separately (on SHIPPING),
+    // so it is intentionally not a constructor arg and stays out of the state-change upsert.
+    public PurchaseCurrent(UUID purchaseUuid, UUID userUuid, UUID historyUuid,
+                           PurchaseState purchaseState, BigDecimal price, LocalDateTime updatedAt) {
+        this.purchaseUuid = purchaseUuid;
+        this.userUuid = userUuid;
+        this.historyUuid = historyUuid;
+        this.purchaseState = purchaseState;
+        this.price = price;
+        this.updatedAt = updatedAt;
+    }
 }

@@ -17,6 +17,7 @@ import com.example.bookserver.purchase.dto.OrderDetailResponse;
 import com.example.bookserver.purchase.dto.OrderSummaryResponse;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderResponse;
+import com.example.bookserver.purchase.dto.ShipOrderRequest;
 
 import jakarta.validation.Valid;
 
@@ -69,5 +70,28 @@ public class PurchaseController {
     @PostMapping("/{purchaseUuid}/cancel")
     public void cancel(@AuthenticationPrincipal UUID userUuid, @PathVariable UUID purchaseUuid) {
         purchaseService.cancel(userUuid, purchaseUuid);
+    }
+
+    // --- fulfillment lifecycle (#26). prepare/ship/deliver are admin-only (enforced in
+    // SecurityConfig) and act on any order; confirm is the buyer's own action. ---
+
+    @PostMapping("/{purchaseUuid}/prepare")
+    public void prepare(@PathVariable UUID purchaseUuid) {
+        purchaseService.prepare(purchaseUuid);
+    }
+
+    @PostMapping("/{purchaseUuid}/ship")
+    public void ship(@PathVariable UUID purchaseUuid, @Valid @RequestBody ShipOrderRequest request) {
+        purchaseService.ship(purchaseUuid, request.trackingNumber());
+    }
+
+    @PostMapping("/{purchaseUuid}/deliver")
+    public void deliver(@PathVariable UUID purchaseUuid) {
+        purchaseService.deliver(purchaseUuid);
+    }
+
+    @PostMapping("/{purchaseUuid}/confirm")
+    public void confirm(@AuthenticationPrincipal UUID userUuid, @PathVariable UUID purchaseUuid) {
+        purchaseService.confirm(userUuid, purchaseUuid);
     }
 }
