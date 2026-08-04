@@ -10,10 +10,15 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.bookserver.address.Address;
+import com.example.bookserver.address.AddressMapper;
+import com.example.bookserver.address.AddressNotFoundException;
+import com.example.bookserver.address.PostalCodes;
 import com.example.bookserver.book.BookMapper;
 import com.example.bookserver.cart.CartItemView;
 import com.example.bookserver.cart.CartService;
 import com.example.bookserver.common.Uuids;
+import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 
 /**
  * Orders on top of the append-only purchase tables. Each state change appends one
@@ -32,28 +37,41 @@ public class PurchaseService {
     private final PurchaseCurrentMapper currentMapper;
     private final PurchaseHistoryMapper historyMapper;
     private final PurchaseBookHistoryMapper bookHistoryMapper;
+    private final OrderAddressMapper orderAddressMapper;
+    private final AddressMapper addressMapper;
     private final BookMapper bookMapper;
     private final CartService cartService;
 
     public PurchaseService(PurchaseCurrentMapper currentMapper,
                            PurchaseHistoryMapper historyMapper,
                            PurchaseBookHistoryMapper bookHistoryMapper,
+                           OrderAddressMapper orderAddressMapper,
+                           AddressMapper addressMapper,
                            BookMapper bookMapper,
                            CartService cartService) {
         this.currentMapper = currentMapper;
         this.historyMapper = historyMapper;
         this.bookHistoryMapper = bookHistoryMapper;
+        this.orderAddressMapper = orderAddressMapper;
+        this.addressMapper = addressMapper;
         this.bookMapper = bookMapper;
         this.cartService = cartService;
     }
 
     /**
-     * Place an order from the user's cart: reserve stock for every line, record the
-     * order as {@code PAYMENT_PENDING}, and empty the cart. If any book is short on
-     * stock the whole thing rolls back. Returns the new purchase_uuid.
+     * Place an order from the user's cart: snapshot the chosen delivery address, reserve
+     * stock for every line, record the order as {@code PAYMENT_PENDING}, and empty the cart.
+     * If any book is short on stock the whole thing rolls back. Returns the new purchase_uuid.
      */
     @Transactional
-    public UUID placeOrder(UUID userUuid) {
+    public UUID placeOrder(UUID userUuid, PlaceOrderRequest req) {
+        // The order id has no dependency on anything, so mint it up front — that lets the
+        // delivery snapshot be built complete (no half-initialized row patched in later).
+        UUID purchaseUuid = Uuids.newId();
+        // Resolve (and own-check / format-validate) the address before touching stock, so a
+        // bad or not-owned address fails fast rather than reserving inventory then rolling back.
+        OrderAddress delivery = resolveDeliveryAddress(purchaseUuid, userUuid, req);
+
         List<CartItemView> cart = cartService.listMyCart(userUuid);
         if (cart.isEmpty()) {
             throw new EmptyCartException();
@@ -63,7 +81,6 @@ public class PurchaseService {
                 throw new InsufficientInventoryException(item.getBookUuid());
             }
         }
-        UUID purchaseUuid = Uuids.newId();
         BigDecimal total = cart.stream()
                 .map(i -> i.getPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -71,8 +88,31 @@ public class PurchaseService {
                 .map(i -> new BookLine(i.getBookUuid(), i.getQuantity(), i.getPrice()))
                 .toList();
         recordEvent(purchaseUuid, userUuid, PurchaseState.PAYMENT_PENDING, total, lines, LocalDateTime.now());
+        orderAddressMapper.insert(delivery);   // purchase_current row now exists (recordEvent upserted it)
         cartService.clear(userUuid);
         return purchaseUuid;
+    }
+
+    /**
+     * Build the immutable delivery snapshot for {@code purchaseUuid}: either a saved address the
+     * user owns (404 if it is not theirs / missing) or a one-off inline address (postal code
+     * format-validated per country). The DTO guarantees exactly one of the two is set.
+     */
+    private OrderAddress resolveDeliveryAddress(UUID purchaseUuid, UUID userUuid, PlaceOrderRequest req) {
+        if (req.addressUuid() != null) {
+            Address a = addressMapper.findByIdAndUser(req.addressUuid(), userUuid);
+            if (a == null) {
+                throw new AddressNotFoundException(req.addressUuid());   // don't reveal others' addresses
+            }
+            return new OrderAddress(purchaseUuid, a.getRecipient(), a.getPhone(), a.getCountry(),
+                    a.getRoadAddress(), a.getDetailAddress(), a.getPostalCode(),
+                    req.addressUuid(), null);   // breadcrumb to the saved address it was copied from
+        }
+        PlaceOrderRequest.InlineAddress in = req.address();
+        String country = PostalCodes.normalizeCountry(in.country());
+        PostalCodes.validate(country, in.postalCode());
+        return new OrderAddress(purchaseUuid, in.recipient(), in.phone(), country,
+                in.roadAddress(), in.detailAddress(), in.postalCode(), null, null);   // one-off: no source
     }
 
     /** Confirm payment: {@code PAYMENT_PENDING -> ORDERED}. */
@@ -90,12 +130,13 @@ public class PurchaseService {
         return currentMapper.findByUserUuid(userUuid);
     }
 
-    /** One order: its current header, the books in it, and the full state timeline. */
+    /** One order: its current header, its delivery address, the books in it, and the full state timeline. */
     public OrderDetail getOrder(UUID userUuid, UUID purchaseUuid) {
         PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
+        OrderAddress delivery = orderAddressMapper.findByPurchaseUuid(purchaseUuid);
         List<OrderBookItem> items = bookHistoryMapper.findItemsWithBookByHistoryUuid(current.getHistoryUuid());
         List<PurchaseHistory> history = historyMapper.findAllByPurchaseUuid(purchaseUuid);
-        return new OrderDetail(current, items, history);
+        return new OrderDetail(current, delivery, items, history);
     }
 
     /** Cancel an order (only before it is prepared) and return its reserved stock. */

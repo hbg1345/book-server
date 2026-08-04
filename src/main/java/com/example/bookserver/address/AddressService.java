@@ -1,9 +1,7 @@
 package com.example.bookserver.address;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,10 +22,6 @@ import com.example.bookserver.common.Uuids;
 @Service
 public class AddressService {
 
-    /** Per-country postal-code format rules. Countries absent here are not format-checked. */
-    private static final Map<String, Pattern> POSTAL_FORMATS = Map.of(
-            "KR", Pattern.compile("\\d{5}"));
-
     private final AddressMapper addressMapper;
 
     public AddressService(AddressMapper addressMapper) {
@@ -37,8 +31,8 @@ public class AddressService {
     /** Save a new address to the user's book; returns the generated address_uuid. */
     @Transactional
     public UUID addAddress(UUID userUuid, CreateAddressRequest req) {
-        String country = normalizeCountry(req.country());
-        validatePostalCode(country, req.postalCode());
+        String country = PostalCodes.normalizeCountry(req.country());
+        PostalCodes.validate(country, req.postalCode());
 
         UUID addressUuid = Uuids.newId();
         Address a = new Address(addressUuid, userUuid, req.alias(), req.recipient(), req.phone(),
@@ -60,8 +54,8 @@ public class AddressService {
     /** Replace a saved address the user owns; 404 if it is not theirs / missing. */
     @Transactional
     public void updateAddress(UUID userUuid, UUID addressUuid, UpdateAddressRequest req) {
-        String country = normalizeCountry(req.country());
-        validatePostalCode(country, req.postalCode());
+        String country = PostalCodes.normalizeCountry(req.country());
+        PostalCodes.validate(country, req.postalCode());
 
         Address a = new Address(addressUuid, userUuid, req.alias(), req.recipient(), req.phone(),
                 country, req.roadAddress(), req.detailAddress(), req.postalCode(),
@@ -79,17 +73,6 @@ public class AddressService {
     public void deleteAddress(UUID userUuid, UUID addressUuid) {
         if (addressMapper.delete(addressUuid, userUuid) == 0) {
             throw new AddressNotFoundException(addressUuid);
-        }
-    }
-
-    private static String normalizeCountry(String country) {
-        return country.toUpperCase();
-    }
-
-    private static void validatePostalCode(String country, String postalCode) {
-        Pattern format = POSTAL_FORMATS.get(country);
-        if (format != null && !format.matcher(postalCode).matches()) {
-            throw new InvalidPostalCodeException(country, postalCode);
         }
     }
 }

@@ -79,6 +79,22 @@ public class AddressMapperTest {
         assertThat(found.getCreatedAt()).isNotNull();   // DB default
     }
 
+    // Verifies: findByIdAndUser returns the row only for its owner — the owner gets it,
+    // another user (guessing the id) gets null. Used to snapshot an address onto an order.
+    @Test
+    void findByIdAndUser_isOwnerScoped() {
+        UUID owner = persistUser();
+        UUID other = persistUser();
+        Address a = newAddress(owner, "Home", false);
+        addressMapper.insert(a);
+
+        assertThat(addressMapper.findByIdAndUser(a.getAddressUuid(), other)).isNull();
+        Address found = addressMapper.findByIdAndUser(a.getAddressUuid(), owner);
+        assertThat(found).isNotNull();
+        assertThat(found.getAlias()).isEqualTo("Home");
+        assertThat(found.isDefaultAddress()).isFalse();
+    }
+
     // Verifies: findByUser returns every address for that user, default first.
     @Test
     void findByUser_returnsAll_defaultFirst() {

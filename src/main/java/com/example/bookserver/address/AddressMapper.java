@@ -42,6 +42,14 @@ public interface AddressMapper {
     })
     Address findById(UUID addressUuid);
 
+    // owner-scoped single fetch: used when snapshotting a saved address onto an order, so a
+    // user can never order to (or probe the existence of) another user's address by guessing id
+    @Select("SELECT * FROM address WHERE address_uuid = #{addressUuid} AND user_uuid = #{userUuid}")
+    @Results({
+            @Result(property = "defaultAddress", column = "is_default")
+    })
+    Address findByIdAndUser(@Param("addressUuid") UUID addressUuid, @Param("userUuid") UUID userUuid);
+
     // a user's whole address book; default first, then oldest-added, for a stable list
     @Select("""
             SELECT * FROM address
