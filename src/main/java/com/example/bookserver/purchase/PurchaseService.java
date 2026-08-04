@@ -18,6 +18,14 @@ import com.example.bookserver.book.BookMapper;
 import com.example.bookserver.cart.CartItemView;
 import com.example.bookserver.cart.CartService;
 import com.example.bookserver.common.Uuids;
+import com.example.bookserver.payment.ChargeRequest;
+import com.example.bookserver.payment.ChargeResult;
+import com.example.bookserver.payment.Payment;
+import com.example.bookserver.payment.PaymentAmountMismatchException;
+import com.example.bookserver.payment.PaymentGateway;
+import com.example.bookserver.payment.PaymentMapper;
+import com.example.bookserver.payment.PaymentStatus;
+import com.example.bookserver.purchase.dto.PayRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 
 /**
@@ -39,6 +47,8 @@ public class PurchaseService {
     private final PurchaseBookHistoryMapper bookHistoryMapper;
     private final OrderAddressMapper orderAddressMapper;
     private final AddressMapper addressMapper;
+    private final PaymentMapper paymentMapper;
+    private final PaymentGateway paymentGateway;
     private final BookMapper bookMapper;
     private final CartService cartService;
 
@@ -47,6 +57,8 @@ public class PurchaseService {
                            PurchaseBookHistoryMapper bookHistoryMapper,
                            OrderAddressMapper orderAddressMapper,
                            AddressMapper addressMapper,
+                           PaymentMapper paymentMapper,
+                           PaymentGateway paymentGateway,
                            BookMapper bookMapper,
                            CartService cartService) {
         this.currentMapper = currentMapper;
@@ -54,6 +66,8 @@ public class PurchaseService {
         this.bookHistoryMapper = bookHistoryMapper;
         this.orderAddressMapper = orderAddressMapper;
         this.addressMapper = addressMapper;
+        this.paymentMapper = paymentMapper;
+        this.paymentGateway = paymentGateway;
         this.bookMapper = bookMapper;
         this.cartService = cartService;
     }
@@ -115,14 +129,43 @@ public class PurchaseService {
                 in.roadAddress(), in.detailAddress(), in.postalCode(), null, null);   // one-off: no source
     }
 
-    /** Confirm payment: {@code PAYMENT_PENDING -> ORDERED}. */
+    /**
+     * Charge the order and, on success, advance it {@code PAYMENT_PENDING -> ORDERED}. The
+     * charge amount is verified server-side against the order total (a mismatch is rejected
+     * before the gateway is touched) and the payment key is used as the idempotency key, so a
+     * retry with the same key returns the existing charge instead of charging again. A declined
+     * charge records a FAILED payment and leaves the order unpaid. Returns the payment record.
+     */
     @Transactional
-    public void pay(UUID userUuid, UUID purchaseUuid) {
+    public Payment pay(UUID userUuid, UUID purchaseUuid, PayRequest req) {
         PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
-        if (current.getPurchaseState() != PurchaseState.PAYMENT_PENDING) {
-            throw new IllegalOrderStateException("Order is not awaiting payment: " + current.getPurchaseState());
+
+        // idempotent replay: the same payment key resolves to its existing charge, no re-charge
+        Payment existing = paymentMapper.findByIdempotencyKey(req.paymentKey());
+        if (existing != null) {
+            return existing;
         }
-        transition(current, PurchaseState.ORDERED);
+
+        requireState(current, PurchaseState.PAYMENT_PENDING);
+
+        BigDecimal orderTotal = current.getPrice();
+        if (req.amount().compareTo(orderTotal) != 0) {
+            throw new PaymentAmountMismatchException(orderTotal, req.amount());   // never trust the client
+        }
+
+        ChargeResult result = paymentGateway.confirm(new ChargeRequest(
+                purchaseUuid, orderTotal, "KRW", req.paymentKey(), req.paymentKey()));
+
+        Payment payment = new Payment(Uuids.newId(), purchaseUuid, req.provider(),
+                result.providerTransactionId(), orderTotal,
+                result.success() ? PaymentStatus.PAID : PaymentStatus.FAILED,
+                req.paymentKey(), null, null);
+        paymentMapper.insert(payment);
+
+        if (result.success()) {
+            transition(current, PurchaseState.ORDERED);
+        }
+        return payment;
     }
 
     /** Current state of all of the user's orders, newest first. */

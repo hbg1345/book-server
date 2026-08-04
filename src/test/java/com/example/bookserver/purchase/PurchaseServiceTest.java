@@ -22,6 +22,12 @@ import com.example.bookserver.book.BookMapper;
 import com.example.bookserver.cart.CartItemMapper;
 import com.example.bookserver.cart.CartService;
 import com.example.bookserver.common.Uuids;
+import com.example.bookserver.payment.FakePaymentGateway;
+import com.example.bookserver.payment.Payment;
+import com.example.bookserver.payment.PaymentAmountMismatchException;
+import com.example.bookserver.payment.PaymentMapper;
+import com.example.bookserver.payment.PaymentStatus;
+import com.example.bookserver.purchase.dto.PayRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest.InlineAddress;
 import com.example.bookserver.user.User;
@@ -46,6 +52,8 @@ public class PurchaseServiceTest {
     @Autowired
     private AddressMapper addressMapper;
     @Autowired
+    private PaymentMapper paymentMapper;
+    @Autowired
     private BookMapper bookMapper;
     @Autowired
     private CartItemMapper cartItemMapper;
@@ -53,13 +61,20 @@ public class PurchaseServiceTest {
     private UserMapper userMapper;
 
     private CartService cartService;
+    private FakePaymentGateway gateway;
     private PurchaseService purchaseService;
 
     @BeforeEach
     void setUp() {
         cartService = new CartService(cartItemMapper, bookMapper);
+        gateway = new FakePaymentGateway();   // succeeds by default
         purchaseService = new PurchaseService(currentMapper, historyMapper, bookHistoryMapper,
-                orderAddressMapper, addressMapper, bookMapper, cartService);
+                orderAddressMapper, addressMapper, paymentMapper, gateway, bookMapper, cartService);
+    }
+
+    /** A pay request for the given order total, with a unique payment key. */
+    private static PayRequest payFor(UUID purchaseUuid, String amount) {
+        return new PayRequest("TOSS", "pk-" + purchaseUuid, new BigDecimal(amount));
     }
 
     /** A minimal valid order request with a one-off inline delivery address. */
@@ -156,7 +171,7 @@ public class PurchaseServiceTest {
         cartService.addItem(user, book, 1);
         UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
 
-        purchaseService.pay(user, purchaseUuid);
+        purchaseService.pay(user, purchaseUuid, payFor(purchaseUuid, "39.99"));
 
         assertThat(currentMapper.findByPurchaseUuid(purchaseUuid).getPurchaseState())
                 .isEqualTo(PurchaseState.ORDERED);
@@ -170,10 +185,84 @@ public class PurchaseServiceTest {
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 1);
         UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
-        purchaseService.pay(user, purchaseUuid);   // now ORDERED
+        purchaseService.pay(user, purchaseUuid, payFor(purchaseUuid, "39.99"));   // now ORDERED
 
-        assertThatThrownBy(() -> purchaseService.pay(user, purchaseUuid))
+        // a fresh payment attempt (different key) on an already-paid order is rejected
+        PayRequest another = new PayRequest("TOSS", "pk-second-" + purchaseUuid, new BigDecimal("39.99"));
+        assertThatThrownBy(() -> purchaseService.pay(user, purchaseUuid, another))
                 .isInstanceOf(IllegalOrderStateException.class);
+    }
+
+    // --- payment / charge (#25) ---
+
+    // paying charges the gateway (with the SERVER's order total), persists a PAID payment, and
+    // advances the order to ORDERED.
+    @Test
+    void pay_charges_persistsPaidPayment_andAdvances() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
+
+        Payment result = purchaseService.pay(user, p, payFor(p, "39.99"));
+
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.PAID);
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.ORDERED);
+        Payment saved = paymentMapper.findByPurchaseUuid(p);
+        assertThat(saved.getStatus()).isEqualTo(PaymentStatus.PAID);
+        assertThat(saved.getProvider()).isEqualTo("TOSS");
+        assertThat(saved.getProviderTxnId()).isNotBlank();
+        assertThat(saved.getAmount()).isEqualByComparingTo("39.99");
+        assertThat(gateway.chargeCount()).isEqualTo(1);
+        assertThat(gateway.lastChargedAmount()).isEqualByComparingTo("39.99");   // server total, not client's
+    }
+
+    // a declined charge leaves the order at PAYMENT_PENDING and records a FAILED payment (audit).
+    @Test
+    void pay_chargeFailure_staysPending_recordsFailed() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
+        gateway.setSucceed(false);
+
+        Payment result = purchaseService.pay(user, p, payFor(p, "39.99"));
+
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.PAYMENT_PENDING);
+        assertThat(paymentMapper.findByPurchaseUuid(p).getStatus()).isEqualTo(PaymentStatus.FAILED);
+    }
+
+    // a charge amount that does not match the order total is rejected before the gateway is touched.
+    @Test
+    void pay_amountMismatch_isRejected_andNeverCharges() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
+
+        PayRequest tampered = new PayRequest("TOSS", "pk-tamper", new BigDecimal("9.99"));   // != 39.99
+        assertThatThrownBy(() -> purchaseService.pay(user, p, tampered))
+                .isInstanceOf(PaymentAmountMismatchException.class);
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.PAYMENT_PENDING);
+        assertThat(gateway.chargeCount()).isZero();
+    }
+
+    // retrying pay with the same idempotency key does not charge twice.
+    @Test
+    void pay_idempotentRetry_doesNotDoubleCharge() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
+        PayRequest req = payFor(p, "39.99");   // same key on both calls
+
+        purchaseService.pay(user, p, req);
+        Payment retry = purchaseService.pay(user, p, req);   // idempotent replay
+
+        assertThat(retry.getStatus()).isEqualTo(PaymentStatus.PAID);
+        assertThat(gateway.chargeCount()).isEqualTo(1);   // charged exactly once
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.ORDERED);
     }
 
     // order listing is scoped to the calling user.
@@ -263,7 +352,7 @@ public class PurchaseServiceTest {
         UUID pending = purchaseService.placeOrder(user, inlineOrder());         // stays PAYMENT_PENDING
         cartService.addItem(user, book, 1);
         UUID paid = purchaseService.placeOrder(user, inlineOrder());
-        purchaseService.pay(user, paid);                        // now ORDERED, not pending
+        purchaseService.pay(user, paid, payFor(paid, "39.99"));   // now ORDERED, not pending
 
         // a cutoff in the future treats the just-placed order as stale; the paid one is excluded by state
         assertThat(purchaseService.findUnpaidOrdersBefore(LocalDateTime.now().plusMinutes(1)))
@@ -296,7 +385,7 @@ public class PurchaseServiceTest {
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 2);
         UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());   // inventory now 8
-        purchaseService.pay(user, purchaseUuid);               // ORDERED
+        purchaseService.pay(user, purchaseUuid, payFor(purchaseUuid, "79.98"));   // ORDERED
 
         purchaseService.expireUnpaidOrder(purchaseUuid);
 
@@ -390,7 +479,8 @@ public class PurchaseServiceTest {
     private UUID placedAndPaid(UUID user, UUID book) {
         cartService.addItem(user, book, 1);
         UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
-        purchaseService.pay(user, purchaseUuid);   // -> ORDERED
+        BigDecimal total = currentMapper.findByPurchaseUuid(purchaseUuid).getPrice();
+        purchaseService.pay(user, purchaseUuid, payFor(purchaseUuid, total.toPlainString()));   // -> ORDERED
         return purchaseUuid;
     }
 
