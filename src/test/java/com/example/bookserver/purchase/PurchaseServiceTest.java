@@ -321,6 +321,19 @@ public class PurchaseServiceTest {
         assertThat(snapshot.getRecipient()).isEqualTo("Grace Hopper");
         assertThat(snapshot.getPostalCode()).isEqualTo("06236");
         assertThat(snapshot.getCountry()).isEqualTo("KR");
+        assertThat(snapshot.getSourceAddressUuid()).isEqualTo(addressUuid);   // breadcrumb to the saved address
+    }
+
+    // a one-off inline order records no source address (breadcrumb is null).
+    @Test
+    void placeOrder_withInlineAddress_hasNullSource() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
+
+        assertThat(orderAddressMapper.findByPurchaseUuid(purchaseUuid).getSourceAddressUuid()).isNull();
     }
 
     // an addressId the caller does not own is treated as not-found; no order or reservation happens.
