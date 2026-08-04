@@ -105,13 +105,14 @@ public class PurchaseService {
                 throw new AddressNotFoundException(req.addressUuid());   // don't reveal others' addresses
             }
             return new OrderAddress(null, a.getRecipient(), a.getPhone(), a.getCountry(),
-                    a.getRoadAddress(), a.getDetailAddress(), a.getPostalCode(), null, null);
+                    a.getRoadAddress(), a.getDetailAddress(), a.getPostalCode(),
+                    req.addressUuid(), null);   // breadcrumb to the saved address it was copied from
         }
         PlaceOrderRequest.InlineAddress in = req.address();
         String country = PostalCodes.normalizeCountry(in.country());
         PostalCodes.validate(country, in.postalCode());
         return new OrderAddress(null, in.recipient(), in.phone(), country,
-                in.roadAddress(), in.detailAddress(), in.postalCode(), null, null);
+                in.roadAddress(), in.detailAddress(), in.postalCode(), null, null);   // one-off: no source
     }
 
     /** Confirm payment: {@code PAYMENT_PENDING -> ORDERED}. */
