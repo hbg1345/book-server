@@ -48,7 +48,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/users").permitAll()  // register
                         .requestMatchers("/api/users/**").authenticated()     // /users/me and below
                         .requestMatchers("/api/cart/**").authenticated()      // the caller's own cart
-                        .requestMatchers("/api/orders/**").authenticated()    // the caller's own orders
+                        // seller/admin fulfillment transitions (must precede the generic /api/orders rule)
+                        .requestMatchers(HttpMethod.POST, "/api/orders/*/prepare", "/api/orders/*/ship",
+                                "/api/orders/*/deliver").hasRole("ADMIN")
+                        .requestMatchers("/api/orders/**").authenticated()    // the caller's own orders (pay/cancel/confirm)
                         .requestMatchers("/api/addresses/**").authenticated() // the caller's own address book
                         // catalog writes are admin-only; reads (GET) stay public via anyRequest below
                         .requestMatchers(HttpMethod.POST, "/api/books/**", "/api/authors/**").hasRole("ADMIN")

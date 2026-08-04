@@ -12,6 +12,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.restdocs.payload.JsonFieldType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -57,6 +58,11 @@ class PurchaseControllerWebMvcTest {
 
     private static RequestPostProcessor asUser(UUID uuid) {
         return authentication(new UsernamePasswordAuthenticationToken(uuid, null, List.of()));
+    }
+
+    private static RequestPostProcessor asAdmin(UUID uuid) {
+        return authentication(new UsernamePasswordAuthenticationToken(uuid, null,
+                List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
     }
 
     // a valid order body shipping to a one-off inline address
@@ -198,9 +204,11 @@ class PurchaseControllerWebMvcTest {
         UUID purchase = UUID.randomUUID();
         UUID book = UUID.randomUUID();
         LocalDateTime at = LocalDateTime.of(2026, 7, 31, 10, 0);
+        PurchaseCurrent current = new PurchaseCurrent(purchase, user, UUID.randomUUID(),
+                PurchaseState.PAYMENT_PENDING, new BigDecimal("79.98"), at);
+        current.setTrackingNumber("1Z999AA10123456784");
         OrderDetail detail = new OrderDetail(
-                new PurchaseCurrent(purchase, user, UUID.randomUUID(), PurchaseState.PAYMENT_PENDING,
-                        new BigDecimal("79.98"), at),
+                current,
                 new OrderAddress(purchase, "Jane Doe", "010-1234-5678", "KR",
                         "123 Sejong-daero", "5F", "06236", null, at),
                 List.of(new OrderBookItem(book, "Clean Architecture", 2, new BigDecimal("39.99"))),
@@ -212,6 +220,7 @@ class PurchaseControllerWebMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.purchaseUuid").value(purchase.toString()))
                 .andExpect(jsonPath("$.purchaseState").value("PAYMENT_PENDING"))
+                .andExpect(jsonPath("$.trackingNumber").value("1Z999AA10123456784"))
                 .andExpect(jsonPath("$.deliveryAddress.recipient").value("Jane Doe"))
                 .andExpect(jsonPath("$.deliveryAddress.postalCode").value("06236"))
                 .andExpect(jsonPath("$.items[0].bookTitle").value("Clean Architecture"))
@@ -223,6 +232,7 @@ class PurchaseControllerWebMvcTest {
                                 fieldWithPath("purchaseState").description("Current order state"),
                                 fieldWithPath("price").description("Order total"),
                                 fieldWithPath("updatedAt").description("When the current state took effect"),
+                                fieldWithPath("trackingNumber").type(JsonFieldType.STRING).optional().description("Shipment tracking number; null until the order ships"),
                                 fieldWithPath("deliveryAddress.recipient").description("Recipient name (snapshot)"),
                                 fieldWithPath("deliveryAddress.phone").description("Recipient phone (snapshot)"),
                                 fieldWithPath("deliveryAddress.country").description("ISO 3166-1 alpha-2 country code"),
@@ -297,6 +307,98 @@ class PurchaseControllerWebMvcTest {
                 .when(purchaseService).cancel(eq(user), eq(purchase));
 
         mockMvc.perform(post("/api/orders/" + purchase + "/cancel").with(asUser(user)))
+                .andExpect(status().isConflict());
+    }
+
+    // --- fulfillment lifecycle (#26) ---
+
+    // prepare: 200, delegates to the service; admin-only.
+    @Test
+    void prepare_delegatesToService_forAdmin() throws Exception {
+        UUID admin = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/prepare").with(asAdmin(admin)))
+                .andExpect(status().isOk())
+                .andDo(document("order-prepare"));
+
+        verify(purchaseService).prepare(purchase);
+    }
+
+    // a non-admin cannot drive fulfillment transitions -> 403; service untouched.
+    @Test
+    void prepare_returns403_forNonAdmin() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/prepare").with(asUser(user)))
+                .andExpect(status().isForbidden());
+        verify(purchaseService, never()).prepare(any());
+    }
+
+    // ship: 200, captures the tracking number from the body; admin-only.
+    @Test
+    void ship_capturesTrackingNumber_forAdmin() throws Exception {
+        UUID admin = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/ship").with(asAdmin(admin))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"trackingNumber\":\"1Z999AA10123456784\"}"))
+                .andExpect(status().isOk())
+                .andDo(document("order-ship",
+                        requestFields(
+                                fieldWithPath("trackingNumber").description("Carrier tracking number"))));
+
+        verify(purchaseService).ship(purchase, "1Z999AA10123456784");
+    }
+
+    // ship without a tracking number -> 400; service untouched.
+    @Test
+    void ship_returns400_whenTrackingMissing() throws Exception {
+        UUID admin = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/ship").with(asAdmin(admin))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+        verify(purchaseService, never()).ship(any(), any());
+    }
+
+    // deliver: 200, delegates to the service; admin-only.
+    @Test
+    void deliver_delegatesToService_forAdmin() throws Exception {
+        UUID admin = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/deliver").with(asAdmin(admin)))
+                .andExpect(status().isOk())
+                .andDo(document("order-deliver"));
+
+        verify(purchaseService).deliver(purchase);
+    }
+
+    // confirm: 200, the buyer's action, scoped to the caller.
+    @Test
+    void confirm_delegatesToService_forBuyer() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/confirm").with(asUser(user)))
+                .andExpect(status().isOk())
+                .andDo(document("order-confirm"));
+
+        verify(purchaseService).confirm(user, purchase);
+    }
+
+    // an illegal transition -> 409 (like pay/cancel).
+    @Test
+    void prepare_returns409_whenIllegalTransition() throws Exception {
+        UUID admin = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        doThrow(new IllegalOrderStateException("not ordered")).when(purchaseService).prepare(purchase);
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/prepare").with(asAdmin(admin)))
                 .andExpect(status().isConflict());
     }
 }
