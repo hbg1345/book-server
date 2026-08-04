@@ -139,6 +139,39 @@ public class PurchaseService {
         return new OrderDetail(current, delivery, items, history);
     }
 
+    /** Seller/admin: {@code ORDERED -> PREPARING}. Not owner-scoped — admin acts on any order. */
+    @Transactional
+    public void prepare(UUID purchaseUuid) {
+        PurchaseCurrent current = requireOrder(purchaseUuid);
+        requireState(current, PurchaseState.ORDERED);
+        transition(current, PurchaseState.PREPARING);
+    }
+
+    /** Seller/admin: {@code PREPARING -> SHIPPING}, capturing the shipment tracking number. */
+    @Transactional
+    public void ship(UUID purchaseUuid, String trackingNumber) {
+        PurchaseCurrent current = requireOrder(purchaseUuid);
+        requireState(current, PurchaseState.PREPARING);
+        transition(current, PurchaseState.SHIPPING);
+        currentMapper.updateTrackingNumber(purchaseUuid, trackingNumber);
+    }
+
+    /** Seller/admin: {@code SHIPPING -> DELIVERED}. */
+    @Transactional
+    public void deliver(UUID purchaseUuid) {
+        PurchaseCurrent current = requireOrder(purchaseUuid);
+        requireState(current, PurchaseState.SHIPPING);
+        transition(current, PurchaseState.DELIVERED);
+    }
+
+    /** Buyer: {@code DELIVERED -> CONFIRMED} (purchase confirmed). Owner-scoped. */
+    @Transactional
+    public void confirm(UUID userUuid, UUID purchaseUuid) {
+        PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
+        requireState(current, PurchaseState.DELIVERED);
+        transition(current, PurchaseState.CONFIRMED);
+    }
+
     /** Cancel an order (only before it is prepared) and return its reserved stock. */
     @Transactional
     public void cancel(UUID userUuid, UUID purchaseUuid) {
@@ -204,6 +237,23 @@ public class PurchaseService {
             throw new OrderNotFoundException(purchaseUuid);   // don't reveal others' orders
         }
         return current;
+    }
+
+    /** Look up an order by id with no ownership check — for admin/seller fulfillment actions. */
+    private PurchaseCurrent requireOrder(UUID purchaseUuid) {
+        PurchaseCurrent current = currentMapper.findByPurchaseUuid(purchaseUuid);
+        if (current == null) {
+            throw new OrderNotFoundException(purchaseUuid);
+        }
+        return current;
+    }
+
+    /** Guard a transition's precondition: the order must currently be in {@code expected}. */
+    private void requireState(PurchaseCurrent current, PurchaseState expected) {
+        if (current.getPurchaseState() != expected) {
+            throw new IllegalOrderStateException(
+                    "Order is " + current.getPurchaseState() + ", expected " + expected);
+        }
     }
 
     /** A book line carried through a state event: which book, how many, at what unit price. */
