@@ -18,6 +18,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import com.example.bookserver.address.AddressNotFoundException;
+import com.example.bookserver.payment.Payment;
+import com.example.bookserver.payment.PaymentAmountMismatchException;
+import com.example.bookserver.payment.PaymentStatus;
 import com.example.bookserver.auth.JwtProvider;
 import com.example.bookserver.auth.SecurityConfig;
 import com.example.bookserver.common.GlobalExceptionHandler;
@@ -265,17 +268,72 @@ class PurchaseControllerWebMvcTest {
             {"provider":"TOSS","paymentKey":"pk_test_123","amount":79.98}
             """;
 
+    private static Payment payment(UUID purchase, PaymentStatus status) {
+        return new Payment(UUID.randomUUID(), purchase, "TOSS", "txn_1",
+                new BigDecimal("79.98"), status, "pk_test_123", null, null);
+    }
+
+    // pay: 200 with the payment result; delegates to the service.
     @Test
-    void pay_delegatesToService() throws Exception {
+    void pay_returns200AndPayment_onSuccess() throws Exception {
         UUID user = UUID.randomUUID();
         UUID purchase = UUID.randomUUID();
+        when(purchaseService.pay(eq(user), eq(purchase), any())).thenReturn(payment(purchase, PaymentStatus.PAID));
 
         mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
                         .contentType(MediaType.APPLICATION_JSON).content(PAY_BODY))
                 .andExpect(status().isOk())
-                .andDo(document("order-pay"));
+                .andExpect(jsonPath("$.status").value("PAID"))
+                .andExpect(jsonPath("$.paymentUuid").exists())
+                .andDo(document("order-pay",
+                        requestFields(
+                                fieldWithPath("provider").description("Payment provider the frontend used, e.g. TOSS"),
+                                fieldWithPath("paymentKey").description("Provider key for the authorized charge (also the idempotency key)"),
+                                fieldWithPath("amount").description("Client's claimed total; verified server-side against the order total")),
+                        responseFields(
+                                fieldWithPath("paymentUuid").description("Payment record id"),
+                                fieldWithPath("status").description("Payment status (PAID)"),
+                                fieldWithPath("providerTxnId").description("Provider transaction id"),
+                                fieldWithPath("amount").description("Charged amount"))));
 
         verify(purchaseService).pay(eq(user), eq(purchase), any());
+    }
+
+    // a declined charge -> 402 Payment Required.
+    @Test
+    void pay_returns402_whenDeclined() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        when(purchaseService.pay(eq(user), eq(purchase), any())).thenReturn(payment(purchase, PaymentStatus.FAILED));
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON).content(PAY_BODY))
+                .andExpect(status().isPaymentRequired());
+    }
+
+    // an invalid body (missing paymentKey/amount) -> 400; service untouched.
+    @Test
+    void pay_returns400_whenBodyInvalid() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"provider\":\"TOSS\"}"))
+                .andExpect(status().isBadRequest());
+        verify(purchaseService, never()).pay(any(), any(), any());
+    }
+
+    // charge amount not matching the order total -> 400.
+    @Test
+    void pay_returns400_whenAmountMismatch() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        doThrow(new PaymentAmountMismatchException(new BigDecimal("79.98"), new BigDecimal("9.99")))
+                .when(purchaseService).pay(eq(user), eq(purchase), any());
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON).content(PAY_BODY))
+                .andExpect(status().isBadRequest());
     }
 
     // pay an order that is not pending -> 409.

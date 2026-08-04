@@ -20,6 +20,7 @@ import com.example.bookserver.auth.InvalidRefreshTokenException;
 import com.example.bookserver.book.BookNotFoundException;
 import com.example.bookserver.cart.CartItemNotFoundException;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
+import com.example.bookserver.payment.PaymentDeclinedException;
 import com.example.bookserver.purchase.EmptyCartException;
 import com.example.bookserver.purchase.IllegalOrderStateException;
 import com.example.bookserver.purchase.InsufficientInventoryException;
@@ -101,6 +102,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(PaymentAmountMismatchException.class)
     public ProblemDetail handlePaymentAmountMismatch(PaymentAmountMismatchException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** The gateway declined the charge; the order remains unpaid. */
+    @ExceptionHandler(PaymentDeclinedException.class)
+    public ProblemDetail handlePaymentDeclined(PaymentDeclinedException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.PAYMENT_REQUIRED, ex.getMessage());
     }
 
     /** Wrong current password on a password change. */

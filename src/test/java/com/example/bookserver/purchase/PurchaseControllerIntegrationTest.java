@@ -17,8 +17,12 @@ import java.util.List;
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.book.BookService;
 import com.example.bookserver.book.dto.BookRequest;
+import com.example.bookserver.payment.PaymentMapper;
+import com.example.bookserver.payment.PaymentStatus;
 import com.example.bookserver.user.UserService;
 import com.jayway.jsonpath.JsonPath;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -43,6 +47,8 @@ class PurchaseControllerIntegrationTest {
     private BookService bookService;
     @Autowired
     private UserService userService;
+    @Autowired
+    private PaymentMapper paymentMapper;
 
     private static final String REGISTER_BODY = """
             {"userId":"jdoe","password":"secret","userName":"Jane Doe",
@@ -117,11 +123,14 @@ class PurchaseControllerIntegrationTest {
                 .andExpect(jsonPath("$.items[0].lineTotal").value(79.98))
                 .andExpect(jsonPath("$.history.length()").value(1));
 
-        // pay -> ORDERED, timeline grows
+        // pay -> charge succeeds (fake gateway), ORDERED, payment persisted, timeline grows
         mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"provider\":\"TOSS\",\"paymentKey\":\"pk_rt\",\"amount\":79.98}"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PAID"));
+        assertThat(paymentMapper.findByPurchaseUuid(java.util.UUID.fromString(order)).getStatus())
+                .isEqualTo(PaymentStatus.PAID);   // record persisted for reconciliation
         mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + token))
                 .andExpect(jsonPath("$.purchaseState").value("ORDERED"))
                 .andExpect(jsonPath("$.history.length()").value(2));
