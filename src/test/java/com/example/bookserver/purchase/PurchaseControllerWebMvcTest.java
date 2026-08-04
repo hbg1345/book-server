@@ -183,7 +183,7 @@ class PurchaseControllerWebMvcTest {
                 new PurchaseCurrent(purchase, user, UUID.randomUUID(), PurchaseState.PAYMENT_PENDING,
                         new BigDecimal("79.98"), at),
                 new OrderAddress(purchase, "Jane Doe", "010-1234-5678", "KR",
-                        "123 Sejong-daero", "5F", "06236", at),
+                        "123 Sejong-daero", "5F", "06236", null, at),
                 List.of(new OrderBookItem(book, "Clean Architecture", 2, new BigDecimal("39.99"))),
                 List.of(new PurchaseHistory(UUID.randomUUID(), purchase, user, PurchaseState.PAYMENT_PENDING,
                         new BigDecimal("79.98"), at)));

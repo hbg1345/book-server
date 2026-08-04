@@ -71,19 +71,20 @@ public class OrderAddressMapperTest {
         return purchaseUuid;
     }
 
-    private OrderAddress snapshot(UUID purchaseUuid) {
+    private OrderAddress snapshot(UUID purchaseUuid, UUID sourceAddressUuid) {
         return new OrderAddress(purchaseUuid, "Grace Hopper", "010-1234-5678", "KR",
-                "서울특별시 강남구 테헤란로 1", "101동 1001호", "06236", null);
+                "서울특별시 강남구 테헤란로 1", "101동 1001호", "06236", sourceAddressUuid, null);
     }
 
     // Verifies: an order's delivery snapshot inserts and reads back by purchase_uuid, all
-    // fields round-trip, and created_at is DB-filled.
+    // fields round-trip (incl. the source_address_uuid breadcrumb), and created_at is DB-filled.
     @Test
     void insert_and_findByPurchaseUuid() {
         UUID userUuid = persistUser();
         UUID purchaseUuid = persistOrder(userUuid);
+        UUID sourceAddress = Uuids.newId();
 
-        orderAddressMapper.insert(snapshot(purchaseUuid));
+        orderAddressMapper.insert(snapshot(purchaseUuid, sourceAddress));
 
         OrderAddress found = orderAddressMapper.findByPurchaseUuid(purchaseUuid);
         assertThat(found).isNotNull();
@@ -93,7 +94,19 @@ public class OrderAddressMapperTest {
         assertThat(found.getRoadAddress()).isEqualTo("서울특별시 강남구 테헤란로 1");
         assertThat(found.getDetailAddress()).isEqualTo("101동 1001호");
         assertThat(found.getPostalCode()).isEqualTo("06236");
+        assertThat(found.getSourceAddressUuid()).isEqualTo(sourceAddress);
         assertThat(found.getCreatedAt()).isNotNull();   // DB default
+    }
+
+    // Verifies: a one-off (inline) order snapshot has no source address — the column is null.
+    @Test
+    void insert_withNullSource_forInlineOrder() {
+        UUID userUuid = persistUser();
+        UUID purchaseUuid = persistOrder(userUuid);
+
+        orderAddressMapper.insert(snapshot(purchaseUuid, null));
+
+        assertThat(orderAddressMapper.findByPurchaseUuid(purchaseUuid).getSourceAddressUuid()).isNull();
     }
 
     // Verifies: findByPurchaseUuid returns null for an order with no snapshot.
