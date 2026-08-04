@@ -4,7 +4,9 @@ import java.util.UUID;
 
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 /**
  * Payment persistence. created_at/updated_at are DB-filled. Column names map to camel-case
@@ -34,4 +36,11 @@ public interface PaymentMapper {
     // idempotency lookup: a retry presenting the same key resolves to the existing charge
     @Select("SELECT * FROM payment WHERE idempotency_key = #{idempotencyKey}")
     Payment findByIdempotencyKey(String idempotencyKey);
+
+    // flip a payment's status (e.g. PAID -> REFUNDED on a refund); bumps updated_at
+    @Update("""
+            UPDATE payment SET status = #{status}, updated_at = CURRENT_TIMESTAMP
+            WHERE payment_uuid = #{paymentUuid}
+            """)
+    int updateStatus(@Param("paymentUuid") UUID paymentUuid, @Param("status") PaymentStatus status);
 }
