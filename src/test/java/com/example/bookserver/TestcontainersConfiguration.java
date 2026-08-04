@@ -6,9 +6,6 @@ import org.springframework.context.annotation.Bean;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
-import com.example.bookserver.payment.FakePaymentGateway;
-import com.example.bookserver.payment.PaymentGateway;
-
 @TestConfiguration(proxyBeanMethods = false)
 public class TestcontainersConfiguration {
 
@@ -18,11 +15,9 @@ public class TestcontainersConfiguration {
         return new PostgreSQLContainer(DockerImageName.parse("postgres:latest"));
     }
 
-    // No real payment provider in tests: the domain depends on the PaymentGateway port, so an
-    // in-memory fake (succeeds by default) stands in for @SpringBootTest contexts.
-    @Bean
-    PaymentGateway paymentGateway() {
-        return new FakePaymentGateway();
-    }
+    // NOTE: no PaymentGateway bean here on purpose. @SpringBootTest contexts wire the real main
+    // bean (StubPaymentGateway) so those tests double as a guard that the app can start in prod;
+    // a test needing a successful charge overrides the gateway locally (see
+    // PurchaseControllerIntegrationTest).
 
 }
