@@ -17,10 +17,11 @@ public interface OrderAddressMapper {
     // created_at is omitted — the DB fills it via DEFAULT CURRENT_TIMESTAMP
     @Insert("""
             INSERT INTO order_address
-                (purchase_uuid, recipient, phone, country, road_address, detail_address, postal_code)
+                (purchase_uuid, recipient, phone, country, road_address, detail_address,
+                 postal_code, source_address_uuid)
             VALUES
                 (#{purchaseUuid}, #{recipient}, #{phone}, #{country},
-                 #{roadAddress}, #{detailAddress}, #{postalCode})
+                 #{roadAddress}, #{detailAddress}, #{postalCode}, #{sourceAddressUuid})
             """)
     void insert(OrderAddress orderAddress);
 

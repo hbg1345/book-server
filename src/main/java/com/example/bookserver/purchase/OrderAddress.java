@@ -26,5 +26,6 @@ public class OrderAddress {
     private String roadAddress;
     private String detailAddress;  // optional
     private String postalCode;
+    private UUID sourceAddressUuid; // saved address it was copied from; null for a one-off inline address (not a FK)
     private LocalDateTime createdAt;
 }
