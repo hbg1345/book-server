@@ -21,6 +21,7 @@ import com.jayway.jsonpath.JsonPath;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -47,6 +48,11 @@ class PurchaseControllerIntegrationTest {
 
     private static final String LOGIN_BODY = """
             {"userId":"jdoe","password":"secret"}
+            """;
+
+    private static final String INLINE_ADDRESS_BODY = """
+            {"address":{"recipient":"Jane Doe","phone":"010-1234-5678","country":"KR",
+             "roadAddress":"123 Sejong-daero","detailAddress":"5F","postalCode":"06236"}}
             """;
 
     private String registerAndLogin() throws Exception {
@@ -85,7 +91,8 @@ class PurchaseControllerIntegrationTest {
                 .andExpect(status().isCreated());
 
         // place the order -> PAYMENT_PENDING, stock reserved (10 -> 8), cart emptied
-        MvcResult placed = mockMvc.perform(post("/api/orders").header("Authorization", "Bearer " + token))
+        MvcResult placed = mockMvc.perform(post("/api/orders").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(INLINE_ADDRESS_BODY))
                 .andExpect(status().isCreated())
                 .andReturn();
         String order = JsonPath.read(placed.getResponse().getContentAsString(), "$.purchaseUuid");
@@ -95,11 +102,13 @@ class PurchaseControllerIntegrationTest {
         mockMvc.perform(get("/api/books/" + book))
                 .andExpect(jsonPath("$.inventory").value(8));   // reserved
 
-        // detail: header + one item (with title/lineTotal) + a one-event timeline
+        // detail: header + snapshotted delivery address + one item (title/lineTotal) + a one-event timeline
         mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.purchaseState").value("PAYMENT_PENDING"))
                 .andExpect(jsonPath("$.price").value(79.98))
+                .andExpect(jsonPath("$.deliveryAddress.recipient").value("Jane Doe"))
+                .andExpect(jsonPath("$.deliveryAddress.postalCode").value("06236"))
                 .andExpect(jsonPath("$.items[0].bookTitle").value("Clean Architecture"))
                 .andExpect(jsonPath("$.items[0].quantity").value(2))
                 .andExpect(jsonPath("$.items[0].lineTotal").value(79.98))
@@ -120,6 +129,56 @@ class PurchaseControllerIntegrationTest {
                 .andExpect(jsonPath("$.history.length()").value(3));
         mockMvc.perform(get("/api/books/" + book))
                 .andExpect(jsonPath("$.inventory").value(10));   // stock given back
+    }
+
+    // order to a SAVED address snapshots it; editing that address afterwards leaves the order unchanged.
+    @Test
+    void order_withSavedAddress_snapshotSurvivesLaterEdit() throws Exception {
+        String token = registerAndLogin();
+        String book = createBook();
+
+        MvcResult saved = mockMvc.perform(post("/api/addresses").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"alias":"Home","recipient":"Grace Hopper","phone":"010-1111-2222","country":"KR",
+                                 "roadAddress":"1 Original Road","detailAddress":"101","postalCode":"06236","defaultAddress":true}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String addressId = JsonPath.read(saved.getResponse().getContentAsString(), "$.addressUuid");
+
+        mockMvc.perform(post("/api/cart/items").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bookUuid\":\"" + book + "\",\"quantity\":1}"))
+                .andExpect(status().isCreated());
+
+        // place the order picking the saved address
+        MvcResult placed = mockMvc.perform(post("/api/orders").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"addressUuid\":\"" + addressId + "\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String order = JsonPath.read(placed.getResponse().getContentAsString(), "$.purchaseUuid");
+
+        // the order carries the snapshot
+        mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.deliveryAddress.recipient").value("Grace Hopper"))
+                .andExpect(jsonPath("$.deliveryAddress.roadAddress").value("1 Original Road"));
+
+        // edit the saved address to entirely different values
+        mockMvc.perform(put("/api/addresses/" + addressId).header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"alias":"Home","recipient":"Ada Lovelace","phone":"010-9999-9999","country":"KR",
+                                 "roadAddress":"999 New Road","detailAddress":"202","postalCode":"04524","defaultAddress":true}
+                                """))
+                .andExpect(status().isOk());
+
+        // the past order is unaffected — still the original snapshot
+        mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.deliveryAddress.recipient").value("Grace Hopper"))
+                .andExpect(jsonPath("$.deliveryAddress.roadAddress").value("1 Original Road"))
+                .andExpect(jsonPath("$.deliveryAddress.postalCode").value("06236"));
     }
 
     // orders require authentication.

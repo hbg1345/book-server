@@ -18,6 +18,8 @@ import com.example.bookserver.purchase.dto.OrderSummaryResponse;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderResponse;
 
+import jakarta.validation.Valid;
+
 /**
  * Order endpoints for the authenticated user. The user's uuid is carried by the JWT
  * and injected via {@link AuthenticationPrincipal}; every operation is scoped to that
@@ -41,7 +43,7 @@ public class PurchaseController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public PlaceOrderResponse place(@AuthenticationPrincipal UUID userUuid,
-                                    @RequestBody PlaceOrderRequest request) {
+                                    @Valid @RequestBody PlaceOrderRequest request) {
         UUID purchaseUuid = purchaseService.placeOrder(userUuid, request);
         // schedule the precise per-order expiry; best-effort, the periodic sweep is the safety net
         orderExpiryScheduler.scheduleExpiry(purchaseUuid);
