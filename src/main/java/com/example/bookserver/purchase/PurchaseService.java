@@ -65,9 +65,12 @@ public class PurchaseService {
      */
     @Transactional
     public UUID placeOrder(UUID userUuid, PlaceOrderRequest req) {
+        // The order id has no dependency on anything, so mint it up front — that lets the
+        // delivery snapshot be built complete (no half-initialized row patched in later).
+        UUID purchaseUuid = Uuids.newId();
         // Resolve (and own-check / format-validate) the address before touching stock, so a
         // bad or not-owned address fails fast rather than reserving inventory then rolling back.
-        OrderAddress delivery = resolveDeliveryAddress(userUuid, req);
+        OrderAddress delivery = resolveDeliveryAddress(purchaseUuid, userUuid, req);
 
         List<CartItemView> cart = cartService.listMyCart(userUuid);
         if (cart.isEmpty()) {
@@ -78,7 +81,6 @@ public class PurchaseService {
                 throw new InsufficientInventoryException(item.getBookUuid());
             }
         }
-        UUID purchaseUuid = Uuids.newId();
         BigDecimal total = cart.stream()
                 .map(i -> i.getPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -86,32 +88,30 @@ public class PurchaseService {
                 .map(i -> new BookLine(i.getBookUuid(), i.getQuantity(), i.getPrice()))
                 .toList();
         recordEvent(purchaseUuid, userUuid, PurchaseState.PAYMENT_PENDING, total, lines, LocalDateTime.now());
-        delivery.setPurchaseUuid(purchaseUuid);   // purchase_current row now exists (recordEvent upserted it)
-        orderAddressMapper.insert(delivery);
+        orderAddressMapper.insert(delivery);   // purchase_current row now exists (recordEvent upserted it)
         cartService.clear(userUuid);
         return purchaseUuid;
     }
 
     /**
-     * Turn the request's address choice into an immutable snapshot: either a saved address
-     * the user owns (404 if it is not theirs / missing) or a one-off inline address (postal
-     * code format-validated per country). The DTO guarantees exactly one of the two is set.
-     * purchase_uuid is filled in by the caller once the order id exists.
+     * Build the immutable delivery snapshot for {@code purchaseUuid}: either a saved address the
+     * user owns (404 if it is not theirs / missing) or a one-off inline address (postal code
+     * format-validated per country). The DTO guarantees exactly one of the two is set.
      */
-    private OrderAddress resolveDeliveryAddress(UUID userUuid, PlaceOrderRequest req) {
+    private OrderAddress resolveDeliveryAddress(UUID purchaseUuid, UUID userUuid, PlaceOrderRequest req) {
         if (req.addressUuid() != null) {
             Address a = addressMapper.findByIdAndUser(req.addressUuid(), userUuid);
             if (a == null) {
                 throw new AddressNotFoundException(req.addressUuid());   // don't reveal others' addresses
             }
-            return new OrderAddress(null, a.getRecipient(), a.getPhone(), a.getCountry(),
+            return new OrderAddress(purchaseUuid, a.getRecipient(), a.getPhone(), a.getCountry(),
                     a.getRoadAddress(), a.getDetailAddress(), a.getPostalCode(),
                     req.addressUuid(), null);   // breadcrumb to the saved address it was copied from
         }
         PlaceOrderRequest.InlineAddress in = req.address();
         String country = PostalCodes.normalizeCountry(in.country());
         PostalCodes.validate(country, in.postalCode());
-        return new OrderAddress(null, in.recipient(), in.phone(), country,
+        return new OrderAddress(purchaseUuid, in.recipient(), in.phone(), country,
                 in.roadAddress(), in.detailAddress(), in.postalCode(), null, null);   // one-off: no source
     }
 
