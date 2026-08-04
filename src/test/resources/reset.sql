@@ -7,6 +7,7 @@
 TRUNCATE
     refresh_token,
     purchase_book_history,
+    payment,
     order_address,
     purchase_current,
     purchase_history,
