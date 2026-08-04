@@ -118,7 +118,9 @@ class PurchaseControllerIntegrationTest {
                 .andExpect(jsonPath("$.history.length()").value(1));
 
         // pay -> ORDERED, timeline grows
-        mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + token))
+        mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"provider\":\"TOSS\",\"paymentKey\":\"pk_rt\",\"amount\":79.98}"))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + token))
                 .andExpect(jsonPath("$.purchaseState").value("ORDERED"))
@@ -215,7 +217,9 @@ class PurchaseControllerIntegrationTest {
                 .andExpect(status().isCreated())
                 .andReturn();
         String order = JsonPath.read(placed.getResponse().getContentAsString(), "$.purchaseUuid");
-        mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + buyer))
+        mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"provider\":\"TOSS\",\"paymentKey\":\"pk_ff\",\"amount\":39.99}"))
                 .andExpect(status().isOk());   // -> ORDERED
 
         // the buyer cannot drive fulfillment transitions
