@@ -15,4 +15,9 @@ public class StubPaymentGateway implements PaymentGateway {
     public ChargeResult confirm(ChargeRequest request) {
         return ChargeResult.failed("payment gateway not configured");
     }
+
+    @Override
+    public RefundResult refund(RefundRequest request) {
+        return RefundResult.failed("payment gateway not configured");
+    }
 }

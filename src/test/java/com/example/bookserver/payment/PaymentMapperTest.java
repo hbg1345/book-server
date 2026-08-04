@@ -93,6 +93,20 @@ public class PaymentMapperTest {
         assertThat(found.getCreatedAt()).isNotNull();   // DB default
     }
 
+    // Verifies: updateStatus flips a payment's status (e.g. PAID -> REFUNDED on a refund).
+    @Test
+    void updateStatus_changesStatus() {
+        UUID user = persistUser();
+        UUID order = persistOrder(user);
+        Payment p = payment(order, "idem-refund", PaymentStatus.PAID);
+        paymentMapper.insert(p);
+
+        int updated = paymentMapper.updateStatus(p.getPaymentUuid(), PaymentStatus.REFUNDED);
+
+        assertThat(updated).isEqualTo(1);
+        assertThat(paymentMapper.findByPurchaseUuid(order).getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+    }
+
     // Verifies: findByIdempotencyKey finds the row for idempotent retry short-circuiting.
     @Test
     void findByIdempotencyKey_returnsRow() {

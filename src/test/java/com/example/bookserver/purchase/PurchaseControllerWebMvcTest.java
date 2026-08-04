@@ -21,6 +21,7 @@ import com.example.bookserver.address.AddressNotFoundException;
 import com.example.bookserver.payment.Payment;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
 import com.example.bookserver.payment.PaymentStatus;
+import com.example.bookserver.payment.RefundFailedException;
 import com.example.bookserver.auth.JwtProvider;
 import com.example.bookserver.auth.SecurityConfig;
 import com.example.bookserver.common.GlobalExceptionHandler;
@@ -464,5 +465,53 @@ class PurchaseControllerWebMvcTest {
 
         mockMvc.perform(post("/api/orders/" + purchase + "/prepare").with(asAdmin(admin)))
                 .andExpect(status().isConflict());
+    }
+
+    // --- refund / return (#25 PR-2) ---
+
+    // return: 200, the buyer's action, delegates to the service scoped to the caller.
+    @Test
+    void return_delegatesToService_forBuyer() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/return").with(asUser(user)))
+                .andExpect(status().isOk())
+                .andDo(document("order-return"));
+
+        verify(purchaseService).returnOrder(user, purchase);
+    }
+
+    // returning an order that has not been delivered -> 409.
+    @Test
+    void return_returns409_whenNotReturnable() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        doThrow(new IllegalOrderStateException("not delivered")).when(purchaseService).returnOrder(user, purchase);
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/return").with(asUser(user)))
+                .andExpect(status().isConflict());
+    }
+
+    // a refund the gateway could not complete -> 502.
+    @Test
+    void return_returns502_whenRefundFails() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        doThrow(new RefundFailedException(purchase)).when(purchaseService).returnOrder(user, purchase);
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/return").with(asUser(user)))
+                .andExpect(status().isBadGateway());
+    }
+
+    // cancelling a paid order whose refund fails -> 502.
+    @Test
+    void cancel_returns502_whenRefundFails() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        doThrow(new RefundFailedException(purchase)).when(purchaseService).cancel(user, purchase);
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/cancel").with(asUser(user)))
+                .andExpect(status().isBadGateway());
     }
 }

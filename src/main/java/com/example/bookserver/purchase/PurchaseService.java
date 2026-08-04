@@ -25,6 +25,9 @@ import com.example.bookserver.payment.PaymentAmountMismatchException;
 import com.example.bookserver.payment.PaymentGateway;
 import com.example.bookserver.payment.PaymentMapper;
 import com.example.bookserver.payment.PaymentStatus;
+import com.example.bookserver.payment.RefundFailedException;
+import com.example.bookserver.payment.RefundRequest;
+import com.example.bookserver.payment.RefundResult;
 import com.example.bookserver.purchase.dto.PayRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 
@@ -41,6 +44,10 @@ public class PurchaseService {
     /** An order may only be cancelled before it starts being prepared. */
     private static final Set<PurchaseState> CANCELLABLE =
             EnumSet.of(PurchaseState.PAYMENT_PENDING, PurchaseState.ORDERED);
+
+    /** An order may be returned (for a refund) once it has been delivered. */
+    private static final Set<PurchaseState> RETURNABLE =
+            EnumSet.of(PurchaseState.DELIVERED, PurchaseState.CONFIRMED);
 
     private final PurchaseCurrentMapper currentMapper;
     private final PurchaseHistoryMapper historyMapper;
@@ -215,14 +222,32 @@ public class PurchaseService {
         transition(current, PurchaseState.CONFIRMED);
     }
 
-    /** Cancel an order (only before it is prepared) and return its reserved stock. */
+    /**
+     * Cancel an order (only before it is prepared). An unpaid order simply releases its reserved
+     * stock and becomes CANCELLED; a paid one (ORDERED) is refunded instead (REFUND_REQUESTED ->
+     * REFUNDED) and its stock restored.
+     */
     @Transactional
     public void cancel(UUID userUuid, UUID purchaseUuid) {
         PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
         if (!CANCELLABLE.contains(current.getPurchaseState())) {
             throw new IllegalOrderStateException("Order can no longer be cancelled: " + current.getPurchaseState());
         }
-        restoreStockAndCancel(current);
+        if (current.getPurchaseState() == PurchaseState.PAYMENT_PENDING) {
+            restoreStockAndCancel(current);   // never charged -> just release the reservation
+        } else {
+            refundAndRestore(current);        // ORDERED -> paid -> refund
+        }
+    }
+
+    /** Buyer returns a delivered order for a refund: {@code DELIVERED/CONFIRMED -> REFUNDED}. Owner-scoped. */
+    @Transactional
+    public void returnOrder(UUID userUuid, UUID purchaseUuid) {
+        PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
+        if (!RETURNABLE.contains(current.getPurchaseState())) {
+            throw new IllegalOrderStateException("Order cannot be returned: " + current.getPurchaseState());
+        }
+        refundAndRestore(current);
     }
 
     /** Purchase uuids still awaiting payment since before {@code cutoff}. */
@@ -247,10 +272,37 @@ public class PurchaseService {
 
     /** Give back the reserved stock for every line and append a {@code CANCELLED} event. */
     private void restoreStockAndCancel(PurchaseCurrent current) {
+        restoreStock(current);
+        transition(current, PurchaseState.CANCELLED);
+    }
+
+    /** Give back the reserved/sold stock for every line of the order's current event. */
+    private void restoreStock(PurchaseCurrent current) {
         for (PurchaseBookHistory book : bookHistoryMapper.findByHistoryUuid(current.getHistoryUuid())) {
             bookMapper.incrementInventory(book.getBookUuid(), book.getQuantity());
         }
-        transition(current, PurchaseState.CANCELLED);
+    }
+
+    /**
+     * Refund a paid order and give its stock back. The gateway is called first, so a failure
+     * throws before anything is written and the order is left exactly as it was (retryable). On
+     * success the timeline records {@code REFUND_REQUESTED -> REFUNDED}, the payment is marked
+     * REFUNDED, and stock is restored.
+     */
+    private void refundAndRestore(PurchaseCurrent current) {
+        Payment payment = paymentMapper.findByPurchaseUuid(current.getPurchaseUuid());
+
+        RefundResult result = paymentGateway.refund(new RefundRequest(
+                payment.getProviderTxnId(), current.getPrice(), payment.getIdempotencyKey() + "-refund"));
+        if (!result.success()) {
+            throw new RefundFailedException(current.getPurchaseUuid());   // nothing written yet
+        }
+
+        transition(current, PurchaseState.REFUND_REQUESTED);
+        paymentMapper.updateStatus(payment.getPaymentUuid(), PaymentStatus.REFUNDED);
+        PurchaseCurrent afterRequest = currentMapper.findByPurchaseUuid(current.getPurchaseUuid());
+        restoreStock(afterRequest);
+        transition(afterRequest, PurchaseState.REFUNDED);
     }
 
     /** Append a new state event carrying the same books (and total) as the current one. */

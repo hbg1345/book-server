@@ -11,19 +11,34 @@ import java.math.BigDecimal;
 public class FakePaymentGateway implements PaymentGateway {
 
     private boolean succeed = true;
+    private boolean refundSucceed = true;
     private int chargeCount = 0;
+    private int refundCount = 0;
     private BigDecimal lastChargedAmount;
+    private BigDecimal lastRefundedAmount;
 
     public void setSucceed(boolean succeed) {
         this.succeed = succeed;
+    }
+
+    public void setRefundSucceed(boolean refundSucceed) {
+        this.refundSucceed = refundSucceed;
     }
 
     public int chargeCount() {
         return chargeCount;
     }
 
+    public int refundCount() {
+        return refundCount;
+    }
+
     public BigDecimal lastChargedAmount() {
         return lastChargedAmount;
+    }
+
+    public BigDecimal lastRefundedAmount() {
+        return lastRefundedAmount;
     }
 
     @Override
@@ -33,5 +48,14 @@ public class FakePaymentGateway implements PaymentGateway {
         return succeed
                 ? ChargeResult.paid("fake_txn_" + request.idempotencyKey())
                 : ChargeResult.failed("card_declined");
+    }
+
+    @Override
+    public RefundResult refund(RefundRequest request) {
+        refundCount++;
+        lastRefundedAmount = request.amount();
+        return refundSucceed
+                ? RefundResult.refunded("fake_refund_" + request.idempotencyKey())
+                : RefundResult.failed("refund_failed");
     }
 }

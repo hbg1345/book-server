@@ -21,6 +21,7 @@ import com.example.bookserver.book.BookNotFoundException;
 import com.example.bookserver.cart.CartItemNotFoundException;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
 import com.example.bookserver.payment.PaymentDeclinedException;
+import com.example.bookserver.payment.RefundFailedException;
 import com.example.bookserver.purchase.EmptyCartException;
 import com.example.bookserver.purchase.IllegalOrderStateException;
 import com.example.bookserver.purchase.InsufficientInventoryException;
@@ -108,6 +109,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(PaymentDeclinedException.class)
     public ProblemDetail handlePaymentDeclined(PaymentDeclinedException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.PAYMENT_REQUIRED, ex.getMessage());
+    }
+
+    /** The gateway could not refund; the order is left unchanged for a retry. */
+    @ExceptionHandler(RefundFailedException.class)
+    public ProblemDetail handleRefundFailed(RefundFailedException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
     }
 
     /** Wrong current password on a password change. */
