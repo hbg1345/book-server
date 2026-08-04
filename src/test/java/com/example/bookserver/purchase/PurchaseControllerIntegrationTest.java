@@ -23,6 +23,7 @@ import com.example.bookserver.payment.ChargeResult;
 import com.example.bookserver.payment.PaymentGateway;
 import com.example.bookserver.payment.PaymentMapper;
 import com.example.bookserver.payment.PaymentStatus;
+import com.example.bookserver.payment.RefundResult;
 import com.example.bookserver.user.UserService;
 import com.jayway.jsonpath.JsonPath;
 
@@ -62,6 +63,7 @@ class PurchaseControllerIntegrationTest {
     @BeforeEach
     void approveCharges() {
         when(paymentGateway.confirm(any())).thenReturn(ChargeResult.paid("txn_it"));
+        when(paymentGateway.refund(any())).thenReturn(RefundResult.refunded("refund_it"));
     }
 
     private static final String REGISTER_BODY = """
@@ -149,12 +151,14 @@ class PurchaseControllerIntegrationTest {
                 .andExpect(jsonPath("$.purchaseState").value("ORDERED"))
                 .andExpect(jsonPath("$.history.length()").value(2));
 
-        // cancel -> CANCELLED, stock restored (8 -> 10)
+        // cancel a PAID order -> refunded (REFUND_REQUESTED -> REFUNDED), stock restored (8 -> 10)
         mockMvc.perform(post("/api/orders/" + order + "/cancel").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + token))
-                .andExpect(jsonPath("$.purchaseState").value("CANCELLED"))
-                .andExpect(jsonPath("$.history.length()").value(3));
+                .andExpect(jsonPath("$.purchaseState").value("REFUNDED"))
+                .andExpect(jsonPath("$.history.length()").value(4));   // PENDING, ORDERED, REFUND_REQUESTED, REFUNDED
+        assertThat(paymentMapper.findByPurchaseUuid(java.util.UUID.fromString(order)).getStatus())
+                .isEqualTo(PaymentStatus.REFUNDED);
         mockMvc.perform(get("/api/books/" + book))
                 .andExpect(jsonPath("$.inventory").value(10));   // stock given back
     }
@@ -272,6 +276,48 @@ class PurchaseControllerIntegrationTest {
         // an illegal transition (delivering an already-confirmed order) -> 409
         mockMvc.perform(post("/api/orders/" + order + "/deliver").header("Authorization", "Bearer " + admin))
                 .andExpect(status().isConflict());
+    }
+
+    // buyer returns a delivered order end-to-end: it is refunded and its stock restored.
+    @Test
+    void return_afterDelivery_refunds_endToEnd() throws Exception {
+        String buyer = registerAndLogin();
+        String admin = adminToken();
+        String book = createBook();
+
+        mockMvc.perform(post("/api/cart/items").header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bookUuid\":\"" + book + "\",\"quantity\":1}"))
+                .andExpect(status().isCreated());
+        MvcResult placed = mockMvc.perform(post("/api/orders").header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON).content(INLINE_ADDRESS_BODY))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String order = JsonPath.read(placed.getResponse().getContentAsString(), "$.purchaseUuid");
+
+        mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"provider\":\"TOSS\",\"paymentKey\":\"pk_ret\",\"amount\":39.99}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/books/" + book)).andExpect(jsonPath("$.inventory").value(9));   // reserved
+
+        // admin fulfills through to delivered
+        mockMvc.perform(post("/api/orders/" + order + "/prepare").header("Authorization", "Bearer " + admin))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/orders/" + order + "/ship").header("Authorization", "Bearer " + admin)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"trackingNumber\":\"T-1\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/orders/" + order + "/deliver").header("Authorization", "Bearer " + admin))
+                .andExpect(status().isOk());
+
+        // buyer returns it -> refunded, stock restored
+        mockMvc.perform(post("/api/orders/" + order + "/return").header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + buyer))
+                .andExpect(jsonPath("$.purchaseState").value("REFUNDED"));
+        assertThat(paymentMapper.findByPurchaseUuid(java.util.UUID.fromString(order)).getStatus())
+                .isEqualTo(PaymentStatus.REFUNDED);
+        mockMvc.perform(get("/api/books/" + book)).andExpect(jsonPath("$.inventory").value(10));   // given back
     }
 
     // orders require authentication.

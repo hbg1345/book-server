@@ -104,4 +104,10 @@ public class PurchaseController {
     public void confirm(@AuthenticationPrincipal UUID userUuid, @PathVariable UUID purchaseUuid) {
         purchaseService.confirm(userUuid, purchaseUuid);
     }
+
+    // buyer returns a delivered order for a refund
+    @PostMapping("/{purchaseUuid}/return")
+    public void returnOrder(@AuthenticationPrincipal UUID userUuid, @PathVariable UUID purchaseUuid) {
+        purchaseService.returnOrder(userUuid, purchaseUuid);
+    }
 }
