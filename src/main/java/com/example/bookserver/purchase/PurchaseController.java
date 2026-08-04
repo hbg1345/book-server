@@ -15,6 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.bookserver.purchase.dto.OrderDetailResponse;
 import com.example.bookserver.purchase.dto.OrderSummaryResponse;
+import com.example.bookserver.payment.Payment;
+import com.example.bookserver.payment.PaymentDeclinedException;
+import com.example.bookserver.payment.PaymentStatus;
+import com.example.bookserver.purchase.dto.PayRequest;
+import com.example.bookserver.purchase.dto.PaymentResponse;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderResponse;
 import com.example.bookserver.purchase.dto.ShipOrderRequest;
@@ -63,8 +68,13 @@ public class PurchaseController {
     }
 
     @PostMapping("/{purchaseUuid}/pay")
-    public void pay(@AuthenticationPrincipal UUID userUuid, @PathVariable UUID purchaseUuid) {
-        purchaseService.pay(userUuid, purchaseUuid);
+    public PaymentResponse pay(@AuthenticationPrincipal UUID userUuid, @PathVariable UUID purchaseUuid,
+                               @Valid @RequestBody PayRequest request) {
+        Payment payment = purchaseService.pay(userUuid, purchaseUuid, request);
+        if (payment.getStatus() != PaymentStatus.PAID) {
+            throw new PaymentDeclinedException(purchaseUuid);   // charge declined -> 402, order stays unpaid
+        }
+        return PaymentResponse.from(payment);
     }
 
     @PostMapping("/{purchaseUuid}/cancel")
