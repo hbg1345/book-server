@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.bookserver.purchase.dto.OrderDetailResponse;
 import com.example.bookserver.purchase.dto.OrderSummaryResponse;
+import com.example.bookserver.purchase.dto.PayRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderResponse;
 import com.example.bookserver.purchase.dto.ShipOrderRequest;
@@ -63,8 +64,9 @@ public class PurchaseController {
     }
 
     @PostMapping("/{purchaseUuid}/pay")
-    public void pay(@AuthenticationPrincipal UUID userUuid, @PathVariable UUID purchaseUuid) {
-        purchaseService.pay(userUuid, purchaseUuid);
+    public void pay(@AuthenticationPrincipal UUID userUuid, @PathVariable UUID purchaseUuid,
+                    @RequestBody PayRequest request) {
+        purchaseService.pay(userUuid, purchaseUuid, request);
     }
 
     @PostMapping("/{purchaseUuid}/cancel")

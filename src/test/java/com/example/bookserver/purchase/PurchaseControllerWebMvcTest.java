@@ -261,16 +261,21 @@ class PurchaseControllerWebMvcTest {
     }
 
     // pay: 200; delegates to the service.
+    private static final String PAY_BODY = """
+            {"provider":"TOSS","paymentKey":"pk_test_123","amount":79.98}
+            """;
+
     @Test
     void pay_delegatesToService() throws Exception {
         UUID user = UUID.randomUUID();
         UUID purchase = UUID.randomUUID();
 
-        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user)))
+        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON).content(PAY_BODY))
                 .andExpect(status().isOk())
                 .andDo(document("order-pay"));
 
-        verify(purchaseService).pay(user, purchase);
+        verify(purchaseService).pay(eq(user), eq(purchase), any());
     }
 
     // pay an order that is not pending -> 409.
@@ -279,9 +284,10 @@ class PurchaseControllerWebMvcTest {
         UUID user = UUID.randomUUID();
         UUID purchase = UUID.randomUUID();
         doThrow(new IllegalOrderStateException("not pending"))
-                .when(purchaseService).pay(eq(user), eq(purchase));
+                .when(purchaseService).pay(eq(user), eq(purchase), any());
 
-        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user)))
+        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON).content(PAY_BODY))
                 .andExpect(status().isConflict());
     }
 
