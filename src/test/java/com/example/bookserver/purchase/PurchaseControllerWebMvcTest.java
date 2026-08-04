@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.restdocs.test.autoconfigure.AutoConfigureRestDocs;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -55,39 +56,48 @@ class PurchaseControllerWebMvcTest {
         return authentication(new UsernamePasswordAuthenticationToken(uuid, null, List.of()));
     }
 
-    // place: 201 + new purchase uuid; the service is called with the authenticated user.
+    // a valid order body shipping to a one-off inline address
+    private static final String INLINE_ADDRESS_BODY = """
+            {"address":{"recipient":"Jane Doe","phone":"010-1234-5678","country":"KR",
+             "roadAddress":"123 Sejong-daero","detailAddress":"5F","postalCode":"06236"}}
+            """;
+
+    // place: 201 + new purchase uuid; the service is called with the authenticated user and the body.
     @Test
     void place_returns201AndPurchaseUuid() throws Exception {
         UUID user = UUID.randomUUID();
         UUID purchase = UUID.randomUUID();
-        when(purchaseService.placeOrder(user)).thenReturn(purchase);
+        when(purchaseService.placeOrder(eq(user), any())).thenReturn(purchase);
 
-        mockMvc.perform(post("/api/orders").with(asUser(user)))
+        mockMvc.perform(post("/api/orders").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON).content(INLINE_ADDRESS_BODY))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.purchaseUuid").value(purchase.toString()))
                 .andDo(document("order-place",
                         responseFields(
                                 fieldWithPath("purchaseUuid").description("UUID of the newly placed order"))));
 
-        verify(purchaseService).placeOrder(user);
+        verify(purchaseService).placeOrder(eq(user), any());
         verify(orderExpiryScheduler).scheduleExpiry(purchase);   // per-order expiry is scheduled
     }
 
     // place without authentication -> 401; service never touched.
     @Test
     void place_returns401_whenNotAuthenticated() throws Exception {
-        mockMvc.perform(post("/api/orders"))
+        mockMvc.perform(post("/api/orders")
+                        .contentType(MediaType.APPLICATION_JSON).content(INLINE_ADDRESS_BODY))
                 .andExpect(status().isUnauthorized());
-        verify(purchaseService, never()).placeOrder(any());
+        verify(purchaseService, never()).placeOrder(any(), any());
     }
 
     // place from an empty cart -> 400.
     @Test
     void place_returns400_whenCartEmpty() throws Exception {
         UUID user = UUID.randomUUID();
-        when(purchaseService.placeOrder(user)).thenThrow(new EmptyCartException());
+        when(purchaseService.placeOrder(eq(user), any())).thenThrow(new EmptyCartException());
 
-        mockMvc.perform(post("/api/orders").with(asUser(user)))
+        mockMvc.perform(post("/api/orders").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON).content(INLINE_ADDRESS_BODY))
                 .andExpect(status().isBadRequest());
     }
 
@@ -95,10 +105,11 @@ class PurchaseControllerWebMvcTest {
     @Test
     void place_returns409_whenStockInsufficient() throws Exception {
         UUID user = UUID.randomUUID();
-        when(purchaseService.placeOrder(user))
+        when(purchaseService.placeOrder(eq(user), any()))
                 .thenThrow(new InsufficientInventoryException(UUID.randomUUID()));
 
-        mockMvc.perform(post("/api/orders").with(asUser(user)))
+        mockMvc.perform(post("/api/orders").with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON).content(INLINE_ADDRESS_BODY))
                 .andExpect(status().isConflict());
     }
 

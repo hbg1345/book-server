@@ -10,10 +10,15 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.bookserver.address.Address;
+import com.example.bookserver.address.AddressMapper;
+import com.example.bookserver.address.AddressNotFoundException;
+import com.example.bookserver.address.PostalCodes;
 import com.example.bookserver.book.BookMapper;
 import com.example.bookserver.cart.CartItemView;
 import com.example.bookserver.cart.CartService;
 import com.example.bookserver.common.Uuids;
+import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 
 /**
  * Orders on top of the append-only purchase tables. Each state change appends one
@@ -32,28 +37,38 @@ public class PurchaseService {
     private final PurchaseCurrentMapper currentMapper;
     private final PurchaseHistoryMapper historyMapper;
     private final PurchaseBookHistoryMapper bookHistoryMapper;
+    private final OrderAddressMapper orderAddressMapper;
+    private final AddressMapper addressMapper;
     private final BookMapper bookMapper;
     private final CartService cartService;
 
     public PurchaseService(PurchaseCurrentMapper currentMapper,
                            PurchaseHistoryMapper historyMapper,
                            PurchaseBookHistoryMapper bookHistoryMapper,
+                           OrderAddressMapper orderAddressMapper,
+                           AddressMapper addressMapper,
                            BookMapper bookMapper,
                            CartService cartService) {
         this.currentMapper = currentMapper;
         this.historyMapper = historyMapper;
         this.bookHistoryMapper = bookHistoryMapper;
+        this.orderAddressMapper = orderAddressMapper;
+        this.addressMapper = addressMapper;
         this.bookMapper = bookMapper;
         this.cartService = cartService;
     }
 
     /**
-     * Place an order from the user's cart: reserve stock for every line, record the
-     * order as {@code PAYMENT_PENDING}, and empty the cart. If any book is short on
-     * stock the whole thing rolls back. Returns the new purchase_uuid.
+     * Place an order from the user's cart: snapshot the chosen delivery address, reserve
+     * stock for every line, record the order as {@code PAYMENT_PENDING}, and empty the cart.
+     * If any book is short on stock the whole thing rolls back. Returns the new purchase_uuid.
      */
     @Transactional
-    public UUID placeOrder(UUID userUuid) {
+    public UUID placeOrder(UUID userUuid, PlaceOrderRequest req) {
+        // Resolve (and own-check / format-validate) the address before touching stock, so a
+        // bad or not-owned address fails fast rather than reserving inventory then rolling back.
+        OrderAddress delivery = resolveDeliveryAddress(userUuid, req);
+
         List<CartItemView> cart = cartService.listMyCart(userUuid);
         if (cart.isEmpty()) {
             throw new EmptyCartException();
@@ -71,8 +86,32 @@ public class PurchaseService {
                 .map(i -> new BookLine(i.getBookUuid(), i.getQuantity(), i.getPrice()))
                 .toList();
         recordEvent(purchaseUuid, userUuid, PurchaseState.PAYMENT_PENDING, total, lines, LocalDateTime.now());
+        delivery.setPurchaseUuid(purchaseUuid);   // purchase_current row now exists (recordEvent upserted it)
+        orderAddressMapper.insert(delivery);
         cartService.clear(userUuid);
         return purchaseUuid;
+    }
+
+    /**
+     * Turn the request's address choice into an immutable snapshot: either a saved address
+     * the user owns (404 if it is not theirs / missing) or a one-off inline address (postal
+     * code format-validated per country). The DTO guarantees exactly one of the two is set.
+     * purchase_uuid is filled in by the caller once the order id exists.
+     */
+    private OrderAddress resolveDeliveryAddress(UUID userUuid, PlaceOrderRequest req) {
+        if (req.addressUuid() != null) {
+            Address a = addressMapper.findByIdAndUser(req.addressUuid(), userUuid);
+            if (a == null) {
+                throw new AddressNotFoundException(req.addressUuid());   // don't reveal others' addresses
+            }
+            return new OrderAddress(null, a.getRecipient(), a.getPhone(), a.getCountry(),
+                    a.getRoadAddress(), a.getDetailAddress(), a.getPostalCode(), null);
+        }
+        PlaceOrderRequest.InlineAddress in = req.address();
+        String country = PostalCodes.normalizeCountry(in.country());
+        PostalCodes.validate(country, in.postalCode());
+        return new OrderAddress(null, in.recipient(), in.phone(), country,
+                in.roadAddress(), in.detailAddress(), in.postalCode(), null);
     }
 
     /** Confirm payment: {@code PAYMENT_PENDING -> ORDERED}. */
