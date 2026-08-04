@@ -13,11 +13,17 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.jdbc.Sql;
 
 import com.example.bookserver.TestcontainersConfiguration;
+import com.example.bookserver.address.Address;
+import com.example.bookserver.address.AddressMapper;
+import com.example.bookserver.address.AddressNotFoundException;
+import com.example.bookserver.address.InvalidPostalCodeException;
 import com.example.bookserver.book.Book;
 import com.example.bookserver.book.BookMapper;
 import com.example.bookserver.cart.CartItemMapper;
 import com.example.bookserver.cart.CartService;
 import com.example.bookserver.common.Uuids;
+import com.example.bookserver.purchase.dto.PlaceOrderRequest;
+import com.example.bookserver.purchase.dto.PlaceOrderRequest.InlineAddress;
 import com.example.bookserver.user.User;
 import com.example.bookserver.user.UserMapper;
 
@@ -36,6 +42,10 @@ public class PurchaseServiceTest {
     @Autowired
     private PurchaseBookHistoryMapper bookHistoryMapper;
     @Autowired
+    private OrderAddressMapper orderAddressMapper;
+    @Autowired
+    private AddressMapper addressMapper;
+    @Autowired
     private BookMapper bookMapper;
     @Autowired
     private CartItemMapper cartItemMapper;
@@ -48,7 +58,22 @@ public class PurchaseServiceTest {
     @BeforeEach
     void setUp() {
         cartService = new CartService(cartItemMapper, bookMapper);
-        purchaseService = new PurchaseService(currentMapper, historyMapper, bookHistoryMapper, bookMapper, cartService);
+        purchaseService = new PurchaseService(currentMapper, historyMapper, bookHistoryMapper,
+                orderAddressMapper, addressMapper, bookMapper, cartService);
+    }
+
+    /** A minimal valid order request with a one-off inline delivery address. */
+    private static PlaceOrderRequest inlineOrder() {
+        return new PlaceOrderRequest(null,
+                new InlineAddress("Jane Doe", "010-1234-5678", "KR", "123 Sejong-daero", "5F", "06236"));
+    }
+
+    /** Save an address to a user's book and return its id. */
+    private UUID persistAddress(UUID userUuid, String recipient, String postalCode) {
+        UUID addressUuid = Uuids.newId();
+        addressMapper.insert(new Address(addressUuid, userUuid, "Home", recipient, "010-0000-0000",
+                "KR", "123 Sejong-daero", "5F", postalCode, false, null));
+        return addressUuid;
     }
 
     // --- FK parents ---
@@ -86,7 +111,7 @@ public class PurchaseServiceTest {
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 2);
 
-        UUID purchaseUuid = purchaseService.placeOrder(user);
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
 
         PurchaseCurrent current = currentMapper.findByPurchaseUuid(purchaseUuid);
         assertThat(current.getPurchaseState()).isEqualTo(PurchaseState.PAYMENT_PENDING);
@@ -107,7 +132,7 @@ public class PurchaseServiceTest {
     void placeOrder_throws_whenCartEmpty() {
         UUID user = persistUser();
 
-        assertThatThrownBy(() -> purchaseService.placeOrder(user))
+        assertThatThrownBy(() -> purchaseService.placeOrder(user, inlineOrder()))
                 .isInstanceOf(EmptyCartException.class);
     }
 
@@ -118,7 +143,7 @@ public class PurchaseServiceTest {
         UUID book = persistBook("Rare Book", "10.00", 1);
         cartService.addItem(user, book, 2);   // want 2, only 1 in stock
 
-        assertThatThrownBy(() -> purchaseService.placeOrder(user))
+        assertThatThrownBy(() -> purchaseService.placeOrder(user, inlineOrder()))
                 .isInstanceOf(InsufficientInventoryException.class);
         assertThat(bookMapper.findById(book).getInventory()).isEqualTo(1);   // untouched
     }
@@ -129,7 +154,7 @@ public class PurchaseServiceTest {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 1);
-        UUID purchaseUuid = purchaseService.placeOrder(user);
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
 
         purchaseService.pay(user, purchaseUuid);
 
@@ -144,7 +169,7 @@ public class PurchaseServiceTest {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 1);
-        UUID purchaseUuid = purchaseService.placeOrder(user);
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
         purchaseService.pay(user, purchaseUuid);   // now ORDERED
 
         assertThatThrownBy(() -> purchaseService.pay(user, purchaseUuid))
@@ -158,9 +183,9 @@ public class PurchaseServiceTest {
         UUID other = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(me, book, 1);
-        UUID mine = purchaseService.placeOrder(me);
+        UUID mine = purchaseService.placeOrder(me, inlineOrder());
         cartService.addItem(other, book, 1);
-        purchaseService.placeOrder(other);
+        purchaseService.placeOrder(other, inlineOrder());
 
         assertThat(purchaseService.listMyOrders(me))
                 .extracting(PurchaseCurrent::getPurchaseUuid)
@@ -175,7 +200,7 @@ public class PurchaseServiceTest {
         UUID book2 = persistBook("A Philosophy of Software Design", "20.00", 10);
         cartService.addItem(user, book1, 1);
         cartService.addItem(user, book2, 2);
-        UUID purchaseUuid = purchaseService.placeOrder(user);
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
 
         OrderDetail detail = purchaseService.getOrder(user, purchaseUuid);
 
@@ -193,7 +218,7 @@ public class PurchaseServiceTest {
         UUID intruder = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(owner, book, 1);
-        UUID purchaseUuid = purchaseService.placeOrder(owner);
+        UUID purchaseUuid = purchaseService.placeOrder(owner, inlineOrder());
 
         assertThatThrownBy(() -> purchaseService.getOrder(intruder, purchaseUuid))
                 .isInstanceOf(OrderNotFoundException.class);
@@ -205,7 +230,7 @@ public class PurchaseServiceTest {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 2);
-        UUID purchaseUuid = purchaseService.placeOrder(user);   // inventory now 8
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());   // inventory now 8
 
         purchaseService.cancel(user, purchaseUuid);
 
@@ -220,7 +245,7 @@ public class PurchaseServiceTest {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 2);
-        UUID purchaseUuid = purchaseService.placeOrder(user);
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
         purchaseService.cancel(user, purchaseUuid);
 
         assertThatThrownBy(() -> purchaseService.cancel(user, purchaseUuid))
@@ -235,9 +260,9 @@ public class PurchaseServiceTest {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 30);
         cartService.addItem(user, book, 1);
-        UUID pending = purchaseService.placeOrder(user);         // stays PAYMENT_PENDING
+        UUID pending = purchaseService.placeOrder(user, inlineOrder());         // stays PAYMENT_PENDING
         cartService.addItem(user, book, 1);
-        UUID paid = purchaseService.placeOrder(user);
+        UUID paid = purchaseService.placeOrder(user, inlineOrder());
         purchaseService.pay(user, paid);                        // now ORDERED, not pending
 
         // a cutoff in the future treats the just-placed order as stale; the paid one is excluded by state
@@ -254,7 +279,7 @@ public class PurchaseServiceTest {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 2);
-        UUID purchaseUuid = purchaseService.placeOrder(user);   // inventory now 8
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());   // inventory now 8
 
         purchaseService.expireUnpaidOrder(purchaseUuid);
 
@@ -270,7 +295,7 @@ public class PurchaseServiceTest {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 2);
-        UUID purchaseUuid = purchaseService.placeOrder(user);   // inventory now 8
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());   // inventory now 8
         purchaseService.pay(user, purchaseUuid);               // ORDERED
 
         purchaseService.expireUnpaidOrder(purchaseUuid);
@@ -278,5 +303,84 @@ public class PurchaseServiceTest {
         assertThat(currentMapper.findByPurchaseUuid(purchaseUuid).getPurchaseState())
                 .isEqualTo(PurchaseState.ORDERED);             // unchanged
         assertThat(bookMapper.findById(book).getInventory()).isEqualTo(8);   // not restored
+    }
+
+    // --- delivery address snapshot ---
+
+    // ordering with a saved addressId copies that address's values onto the order.
+    @Test
+    void placeOrder_withSavedAddress_snapshotsIt() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID addressUuid = persistAddress(user, "Grace Hopper", "06236");
+
+        UUID purchaseUuid = purchaseService.placeOrder(user, new PlaceOrderRequest(addressUuid, null));
+
+        OrderAddress snapshot = orderAddressMapper.findByPurchaseUuid(purchaseUuid);
+        assertThat(snapshot.getRecipient()).isEqualTo("Grace Hopper");
+        assertThat(snapshot.getPostalCode()).isEqualTo("06236");
+        assertThat(snapshot.getCountry()).isEqualTo("KR");
+        assertThat(snapshot.getSourceAddressUuid()).isEqualTo(addressUuid);   // breadcrumb to the saved address
+    }
+
+    // a one-off inline order records no source address (breadcrumb is null).
+    @Test
+    void placeOrder_withInlineAddress_hasNullSource() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
+
+        assertThat(orderAddressMapper.findByPurchaseUuid(purchaseUuid).getSourceAddressUuid()).isNull();
+    }
+
+    // an addressId the caller does not own is treated as not-found; no order or reservation happens.
+    @Test
+    void placeOrder_withOthersAddress_throws_andReservesNothing() {
+        UUID owner = persistUser();
+        UUID intruder = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(intruder, book, 1);
+        UUID othersAddress = persistAddress(owner, "Grace Hopper", "06236");
+
+        assertThatThrownBy(() -> purchaseService.placeOrder(intruder, new PlaceOrderRequest(othersAddress, null)))
+                .isInstanceOf(AddressNotFoundException.class);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(10);   // stock untouched (fail-fast, before reserve)
+        assertThat(purchaseService.listMyOrders(intruder)).isEmpty();
+    }
+
+    // an inline address with a KR postal code of the wrong format is rejected.
+    @Test
+    void placeOrder_withInvalidKrPostal_throws() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+
+        PlaceOrderRequest bad = new PlaceOrderRequest(null,
+                new InlineAddress("Jane Doe", "010-1234-5678", "KR", "123 Sejong-daero", "5F", "1234"));   // 4 digits
+        assertThatThrownBy(() -> purchaseService.placeOrder(user, bad))
+                .isInstanceOf(InvalidPostalCodeException.class);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(10);   // nothing reserved
+    }
+
+    // editing the saved address after ordering does NOT change the order's snapshot.
+    @Test
+    void editingSavedAddress_afterOrder_leavesSnapshotUnchanged() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID addressUuid = persistAddress(user, "Grace Hopper", "06236");
+        UUID purchaseUuid = purchaseService.placeOrder(user, new PlaceOrderRequest(addressUuid, null));
+
+        // mutate the address book entry the order was placed from
+        addressMapper.update(new Address(addressUuid, user, "Home", "Ada Lovelace", "010-9999-9999",
+                "KR", "999 New Road", "1F", "04524", false, null));
+
+        OrderAddress snapshot = orderAddressMapper.findByPurchaseUuid(purchaseUuid);
+        assertThat(snapshot.getRecipient()).isEqualTo("Grace Hopper");   // still the original
+        assertThat(snapshot.getPostalCode()).isEqualTo("06236");
+        assertThat(snapshot.getRoadAddress()).isEqualTo("123 Sejong-daero");
     }
 }
