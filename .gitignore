@@ -43,6 +43,10 @@ out/
 # local secrets
 .env
 
+# local-only compose overrides (e.g. remapping the Postgres host port when a native
+# PostgreSQL already occupies 5432); each machine sets its own.
+docker-compose.override.yml
+
 # Raw source dataset for the book catalog seed (large; regenerate seed via
 # scripts/generate_book_seed.py). The generated gz files under
 # src/main/resources/db/seed/ ARE tracked.
