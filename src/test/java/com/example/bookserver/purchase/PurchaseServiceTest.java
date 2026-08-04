@@ -383,4 +383,116 @@ public class PurchaseServiceTest {
         assertThat(snapshot.getPostalCode()).isEqualTo("06236");
         assertThat(snapshot.getRoadAddress()).isEqualTo("123 Sejong-daero");
     }
+
+    // --- fulfillment lifecycle (#26) ---
+
+    /** Place an order and pay it, leaving it at ORDERED (the start of the fulfillment lifecycle). */
+    private UUID placedAndPaid(UUID user, UUID book) {
+        cartService.addItem(user, book, 1);
+        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
+        purchaseService.pay(user, purchaseUuid);   // -> ORDERED
+        return purchaseUuid;
+    }
+
+    // admin prepare: ORDERED -> PREPARING.
+    @Test
+    void prepare_advancesOrderedToPreparing() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = placedAndPaid(user, book);
+
+        purchaseService.prepare(p);
+
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.PREPARING);
+    }
+
+    // an illegal jump (preparing an order still at PAYMENT_PENDING) is rejected.
+    @Test
+    void prepare_rejectsIllegalTransition() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());   // PAYMENT_PENDING, not ORDERED
+
+        assertThatThrownBy(() -> purchaseService.prepare(p))
+                .isInstanceOf(IllegalOrderStateException.class);
+    }
+
+    // admin ship: PREPARING -> SHIPPING, capturing the tracking number.
+    @Test
+    void ship_setsTrackingNumber_andAdvances() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = placedAndPaid(user, book);
+        purchaseService.prepare(p);
+
+        purchaseService.ship(p, "1Z999AA10123456784");
+
+        PurchaseCurrent c = currentMapper.findByPurchaseUuid(p);
+        assertThat(c.getPurchaseState()).isEqualTo(PurchaseState.SHIPPING);
+        assertThat(c.getTrackingNumber()).isEqualTo("1Z999AA10123456784");
+    }
+
+    // full happy path ORDERED -> ... -> CONFIRMED; tracking number survives later transitions.
+    @Test
+    void deliver_thenConfirm_completesLifecycle_trackingPreserved() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = placedAndPaid(user, book);
+        purchaseService.prepare(p);
+        purchaseService.ship(p, "TRACK-1");
+        purchaseService.deliver(p);
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.DELIVERED);
+
+        purchaseService.confirm(user, p);
+
+        PurchaseCurrent c = currentMapper.findByPurchaseUuid(p);
+        assertThat(c.getPurchaseState()).isEqualTo(PurchaseState.CONFIRMED);
+        assertThat(c.getTrackingNumber()).isEqualTo("TRACK-1");   // not wiped by deliver/confirm
+    }
+
+    // confirm is the buyer's action and is owner-scoped: another user cannot confirm it.
+    @Test
+    void confirm_isOwnerScoped() {
+        UUID owner = persistUser();
+        UUID intruder = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = placedAndPaid(owner, book);
+        purchaseService.prepare(p);
+        purchaseService.ship(p, "T");
+        purchaseService.deliver(p);
+
+        assertThatThrownBy(() -> purchaseService.confirm(intruder, p))
+                .isInstanceOf(OrderNotFoundException.class);
+    }
+
+    // confirming before delivery is rejected.
+    @Test
+    void confirm_rejectsWhenNotDelivered() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = placedAndPaid(user, book);   // ORDERED, not DELIVERED
+
+        assertThatThrownBy(() -> purchaseService.confirm(user, p))
+                .isInstanceOf(IllegalOrderStateException.class);
+    }
+
+    // admin fulfillment transitions are NOT owner-scoped: they act on any user's order.
+    @Test
+    void adminTransition_worksOnAnothersOrder() {
+        UUID buyer = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        UUID p = placedAndPaid(buyer, book);
+
+        purchaseService.prepare(p);   // no user arg -> not scoped to the buyer
+
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.PREPARING);
+    }
+
+    // acting on a non-existent order -> 404.
+    @Test
+    void prepare_throws_whenOrderMissing() {
+        assertThatThrownBy(() -> purchaseService.prepare(Uuids.newId()))
+                .isInstanceOf(OrderNotFoundException.class);
+    }
 }
