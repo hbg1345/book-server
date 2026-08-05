@@ -74,6 +74,38 @@ tasks.named('test') {
     systemProperty 'stripe.webhook-secret', 'whsec_dummy_not_a_real_secret'
     useJUnitPlatform {
         excludeTags 'benchmark'   // keep the heavy 1M-row benchmark out of the normal test run
+        excludeTags 'contract'    // and the sandbox contract, which needs a real key and a network
+    }
+}
+
+// run with:  ./gradlew contractTest
+//
+// Contract tests against the real Stripe sandbox. Kept out of `test` because they need a
+// test-mode key and a network: CI has neither, and a build that goes red when someone else's
+// service is slow teaches people to ignore red builds. Without a key they skip, not fail.
+tasks.register('contractTest', Test) {
+    description = 'Runs the Stripe sandbox contract tests (real API calls, test mode only).'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'contract'
+    }
+    // The key comes from the environment. A local .env is read as a convenience so the same file
+    // that runs `docker compose up` runs these — it is gitignored and never leaves the machine.
+    def envFile = file('.env')
+    if (envFile.exists()) {
+        envFile.readLines().each { line ->
+            def matcher = line =~ /^\s*([A-Z][A-Z0-9_]*)=(.*)$/
+            if (matcher) {
+                environment(matcher[0][1], matcher[0][2].trim().replaceAll(/^["']|["']$/, ''))
+            }
+        }
+    }
+    outputs.upToDateWhen { false }   // always re-run; the point is to ask the live API
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'skipped', 'failed'
     }
 }
 

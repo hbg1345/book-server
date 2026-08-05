@@ -91,6 +91,22 @@ public class StripePaymentGateway implements PaymentGateway {
         }
     }
 
+    /**
+     * Retrieving the balance is the cheapest authenticated read Stripe offers: it creates nothing,
+     * charges nothing, and fails only if the key itself is refused. That makes it a usable answer
+     * to "can this deployment actually take payments" without side effects.
+     */
+    @Override
+    public boolean credentialsValid() {
+        try {
+            stripe.balance().retrieve();
+            return true;
+        } catch (StripeException e) {
+            log.error("Stripe refused this deployment's credentials: {}", reasonOf(e), e);
+            return false;
+        }
+    }
+
     private static RequestOptions idempotent(String idempotencyKey) {
         return RequestOptions.builder().setIdempotencyKey(idempotencyKey).build();
     }

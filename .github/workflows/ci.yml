@@ -124,3 +124,19 @@ jobs:
             --add-cloudsql-instances "${{ vars.CLOUD_SQL_INSTANCE }}" \
             --set-env-vars "SPRING_DATASOURCE_URL=jdbc:postgresql:///${{ vars.DB_NAME }}?cloudSqlInstance=${{ vars.CLOUD_SQL_INSTANCE }}&socketFactory=com.google.cloud.sql.postgres.SocketFactory,SPRING_DATASOURCE_USERNAME=${{ vars.DB_USER }},ORDER_EXPIRY_CLOUD_TASKS_ENABLED=true,GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }},ORDER_EXPIRY_QUEUE_LOCATION=${{ vars.GCP_REGION }},ORDER_EXPIRY_QUEUE=${{ vars.ORDER_EXPIRY_QUEUE }},ORDER_EXPIRY_TARGET_BASE_URL=${{ vars.CLOUD_RUN_BASE_URL }}" \
             --set-secrets "SPRING_DATASOURCE_PASSWORD=DB_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest,INTERNAL_SWEEP_TOKEN=INTERNAL_SWEEP_TOKEN:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest"
+
+      # Ask the revision we just shipped whether Stripe accepts the key it is actually running
+      # with. The test suite cannot answer this: it runs against a key held elsewhere, so it stays
+      # green when the value in Secret Manager is wrong, the IAM binding is missing, or a live key
+      # was deployed where a test one belongs. Building the Stripe client makes no request, so
+      # nothing before this point would notice — the first customer to press pay would.
+      - name: Verify the deployed revision can reach Stripe
+        run: |
+          status=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 \
+            -H "X-Internal-Token: ${{ secrets.INTERNAL_SWEEP_TOKEN }}" \
+            "${{ vars.CLOUD_RUN_BASE_URL }}/internal/payment/health")
+          echo "$status $(cat /tmp/body)"
+          if [ "$status" != "200" ]; then
+            echo "::error::the new revision cannot take payments; check STRIPE_SECRET_KEY in Secret Manager"
+            exit 1
+          fi

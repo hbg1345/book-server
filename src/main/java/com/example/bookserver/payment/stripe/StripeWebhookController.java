@@ -8,6 +8,7 @@ import com.stripe.exception.SignatureVerificationException;
 import com.stripe.model.Event;
 import com.stripe.model.EventDataObjectDeserializer;
 import com.stripe.model.PaymentIntent;
+import com.stripe.model.Refund;
 import com.stripe.model.StripeObject;
 import com.stripe.net.Webhook;
 
@@ -79,9 +80,11 @@ public class StripeWebhookController {
         }
 
         switch (event.getType()) {
-            case "payment_intent.succeeded" -> settle(paymentIntent(event));
+            case "payment_intent.succeeded" -> settle(payload(event, PaymentIntent.class));
             case "payment_intent.payment_failed" ->
-                    purchaseService.markPaymentFailed(paymentIntent(event).getId());
+                    purchaseService.markPaymentFailed(payload(event, PaymentIntent.class).getId());
+            // a refund Stripe already accepted can still be reversed at the bank, days later
+            case "charge.refund.updated" -> refundUpdated(payload(event, Refund.class));
             // we subscribe to a narrow set; anything else is acknowledged so Stripe stops sending it
             default -> log.debug("Ignoring Stripe event of type {}", event.getType());
         }
@@ -109,7 +112,21 @@ public class StripeWebhookController {
     }
 
     /**
-     * The event's payload as a {@link PaymentIntent}.
+     * A refund's status changed. Only a reversal matters: the refund was recorded as done when we
+     * issued it, so "succeeded" is confirmation of something already handled, while "failed" means
+     * the money never reached the buyer and no code path will notice on its own.
+     */
+    private void refundUpdated(Refund refund) {
+        if (!"failed".equals(refund.getStatus())) {
+            log.debug("Ignoring refund {} in status {}", refund.getId(), refund.getStatus());
+            return;
+        }
+        // addressed by the intent, which is what the payment row stores; the refund id is not on it
+        purchaseService.markRefundFailed(refund.getPaymentIntent(), refund.getFailureReason());
+    }
+
+    /**
+     * The event's payload, as the object type the event carries.
      *
      * <p>The typed accessor deliberately returns nothing when the event's API version differs from
      * the one this library pins, because a renamed or restructured field could otherwise be read as
@@ -118,12 +135,13 @@ public class StripeWebhookController {
      * unreadable meant every charge was acknowledged and then dropped — the customer paid and the
      * order sat unshipped until it expired.
      *
-     * <p>So a version mismatch falls back to reading the payload anyway. That is sound for the four
-     * fields taken off it — id, currency, amount, amount_received — which have been part of a
-     * payment intent since the object existed; it would not be sound for a field that is new,
+     * <p>So a version mismatch falls back to reading the payload anyway. That is sound for the
+     * handful of fields taken off these objects — id, currency, amount and amount_received on an
+     * intent; status, payment_intent and failure_reason on a refund — all of which have been
+     * present since the objects existed. It would not be sound for a field that is new,
      * deprecated, or reshaped, and any such addition needs this decision revisited.
      */
-    private PaymentIntent paymentIntent(Event event) {
+    private <T extends StripeObject> T payload(Event event, Class<T> type) {
         EventDataObjectDeserializer deserializer = event.getDataObjectDeserializer();
         StripeObject object = deserializer.getObject().orElseGet(() -> {
             log.info("Event {} is on API version {} but this build pins {}; reading it leniently",
@@ -134,8 +152,8 @@ public class StripeWebhookController {
                 throw new UnreadableEventException(event, e);
             }
         });
-        if (object instanceof PaymentIntent intent) {
-            return intent;
+        if (type.isInstance(object)) {
+            return type.cast(object);
         }
         throw new UnreadableEventException(event, null);
     }
