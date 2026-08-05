@@ -134,6 +134,16 @@ class StripeSandboxContractTest {
     }
 
     /**
+     * The deploy-time check answers true for a key Stripe accepts. The mocked version of this test
+     * can only show we handle a refusal; that a good key actually passes — and that the call we
+     * chose for it is one Stripe permits — is only visible here.
+     */
+    @Test
+    void credentialsValid_isTrue_forAKeyStripeAccepts() {
+        assertThat(gateway.credentialsValid()).isTrue();
+    }
+
+    /**
      * A refusal arrives as a failed result carrying Stripe's own code, not an exception. The code
      * matters beyond this assertion: it is persisted on the payment row, so it has to be Stripe's
      * stable machine-readable string and not a Java class name that changes when we upgrade.

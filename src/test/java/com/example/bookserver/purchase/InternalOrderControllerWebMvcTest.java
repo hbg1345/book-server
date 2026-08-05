@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.example.bookserver.auth.JwtProvider;
 import com.example.bookserver.auth.SecurityConfig;
 import com.example.bookserver.common.GlobalExceptionHandler;
+import com.example.bookserver.common.InternalTokenGuard;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -26,7 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * outside the JWT surface and guarded only by the shared {@code X-Internal-Token} secret.
  */
 @WebMvcTest(InternalOrderController.class)
-@org.springframework.context.annotation.Import({GlobalExceptionHandler.class, SecurityConfig.class, JwtProvider.class})
+@org.springframework.context.annotation.Import({GlobalExceptionHandler.class, SecurityConfig.class, JwtProvider.class, InternalTokenGuard.class})
 @TestPropertySource(properties = "internal.sweep-token=s3cret")
 class InternalOrderControllerWebMvcTest {
 
