@@ -132,11 +132,24 @@ jobs:
       # nothing before this point would notice — the first customer to press pay would.
       - name: Verify the deployed revision can reach Stripe
         run: |
+          # Read the token from Secret Manager rather than a second copy in repo Secrets. The
+          # revision authenticates against the value stored there, so a copy kept here is one that
+          # can drift out of step — which it had, failing this check for a reason that had nothing
+          # to do with what it is meant to be checking.
+          token=$(gcloud secrets versions access latest --secret=INTERNAL_SWEEP_TOKEN)
           status=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 \
-            -H "X-Internal-Token: ${{ secrets.INTERNAL_SWEEP_TOKEN }}" \
+            -H "X-Internal-Token: $token" \
             "${{ vars.CLOUD_RUN_BASE_URL }}/internal/payment/health")
           echo "$status $(cat /tmp/body)"
-          if [ "$status" != "200" ]; then
-            echo "::error::the new revision cannot take payments; check STRIPE_SECRET_KEY in Secret Manager"
-            exit 1
-          fi
+          case "$status" in
+            200) ;;
+            # says nothing about Stripe: the guard rejected us before anything reached it. Worth
+            # fixing regardless — the same token is what lets Cloud Scheduler run the unpaid-order
+            # expiry sweep, so a rejection here means that is not running either.
+            403) echo "::error::/internal/payment/health rejected the token from Secret Manager; check INTERNAL_SWEEP_TOKEN is non-empty and reaching the revision"
+                 exit 1 ;;
+            503) echo "::error::the new revision cannot take payments; check STRIPE_SECRET_KEY in Secret Manager"
+                 exit 1 ;;
+            *)   echo "::error::unexpected $status from /internal/payment/health"
+                 exit 1 ;;
+          esac
