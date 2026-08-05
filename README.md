@@ -20,7 +20,7 @@ Interactive docs (Swagger UI, generated from the tests and published on every pu
 | Books | `GET /api/books` · `GET /api/books/{uuid}` (public) · `POST/PUT/DELETE` | reads public; writes **admin** |
 | Authors | `GET /api/authors?name=` (public) · `POST /api/authors` | reads public; writes **admin** |
 | Cart | `GET /api/cart` · `POST /api/cart/items` · `PUT/DELETE /api/cart/items/{bookUuid}` | bearer |
-| Orders | `POST /api/orders` · `GET /api/orders` · `GET /api/orders/{uuid}` · `POST .../pay` · `POST .../cancel` | bearer |
+| Orders | `POST /api/orders` · `GET /api/orders` · `GET /api/orders/{uuid}` · `POST .../payment-intent` · `POST .../cancel` | bearer |
 
 Auth is a short-lived access JWT (`Authorization: Bearer <accessToken>`) plus a rotating
 opaque refresh token. Send the access token on every protected call; use `/api/auth/refresh`
@@ -59,12 +59,17 @@ docker compose down -v
 
 ### Configuration
 
-Everything has a working default for local use; override via a `.env` file or the shell.
+Most things have a working default for local use; override via a `.env` file or the shell.
+Copy `.env.example` to `.env` to get started — the Stripe keys have no default and the app
+will not start without them.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `bookdb` / `bookuser` / `bookpass` | Database name & credentials |
 | `JWT_SECRET` | dev-only placeholder | HS256 signing secret — **must** be set to a real value (≥ 32 bytes) in production |
+| `STRIPE_SECRET_KEY` | *(none — required)* | Stripe API key. There is no fallback payment gateway: without this the app refuses to start rather than booting unable to charge |
+| `STRIPE_WEBHOOK_SECRET` | *(none)* | Signing secret used to authenticate Stripe webhooks |
+| `STRIPE_CURRENCY` | `usd` | Currency charges are made in. Zero-decimal currencies (`krw`, `jpy`) are charged in whole units |
 
 The app reads its DB connection from `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD`,
 which `docker-compose.yml` wires to the `postgres` service.

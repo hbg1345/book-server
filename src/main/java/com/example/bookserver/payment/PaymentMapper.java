@@ -24,7 +24,8 @@ public interface PaymentMapper {
             """)
     void insert(Payment payment);
 
-    // the latest payment for an order (a failed attempt then a successful one are separate rows)
+    // the payment for an order. One row per order (the key is order-scoped), whose status moves
+    // PENDING -> PAID/FAILED -> REFUNDED; ordering is kept as a guard, not a real expectation.
     @Select("""
             SELECT * FROM payment
             WHERE purchase_uuid = #{purchaseUuid}
@@ -36,6 +37,10 @@ public interface PaymentMapper {
     // idempotency lookup: a retry presenting the same key resolves to the existing charge
     @Select("SELECT * FROM payment WHERE idempotency_key = #{idempotencyKey}")
     Payment findByIdempotencyKey(String idempotencyKey);
+
+    // webhook lookup: the provider only knows its own intent id, so that is how it addresses us
+    @Select("SELECT * FROM payment WHERE provider_txn_id = #{providerTxnId}")
+    Payment findByProviderTxnId(String providerTxnId);
 
     // flip a payment's status (e.g. PAID -> REFUNDED on a refund); bumps updated_at
     @Update("""

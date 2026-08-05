@@ -15,9 +15,10 @@ public class TestcontainersConfiguration {
         return new PostgreSQLContainer(DockerImageName.parse("postgres:latest"));
     }
 
-    // NOTE: no PaymentGateway bean here on purpose. @SpringBootTest contexts wire the real main
-    // bean (StubPaymentGateway) so those tests double as a guard that the app can start in prod;
-    // a test needing a successful charge overrides the gateway locally (see
-    // PurchaseControllerIntegrationTest).
+    // NOTE: no PaymentGateway bean here on purpose. There is no fallback gateway in main any
+    // more, so @SpringBootTest contexts wire the real Stripe adapter off the dummy key set by the
+    // test task in build.gradle — which keeps those tests a guard that the production path is
+    // constructible. Nothing reaches Stripe; a test needing payment behaviour overrides the
+    // gateway locally (see PurchaseControllerIntegrationTest).
 
 }

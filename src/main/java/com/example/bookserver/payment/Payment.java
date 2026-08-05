@@ -10,9 +10,10 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * A persisted payment record for one charge attempt against an order. Links to the order by
- * purchase_uuid, records which provider handled it and the provider's transaction id, and
- * carries the idempotency key that guards against a double charge.
+ * The persisted payment for an order — one row, created when the intent is opened and updated as
+ * the provider reports progress. Links to the order by purchase_uuid, records which provider
+ * handled it and the provider's intent id (used to address a later refund), and carries the
+ * order-scoped idempotency key that guards against opening a second intent.
  */
 @Getter
 @Setter
