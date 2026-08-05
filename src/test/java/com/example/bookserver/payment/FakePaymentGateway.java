@@ -57,6 +57,11 @@ public class FakePaymentGateway implements PaymentGateway {
     }
 
     @Override
+    public boolean credentialsValid() {
+        return true;   // nothing to authenticate against
+    }
+
+    @Override
     public RefundResult refund(RefundRequest request) {
         refundCount++;
         lastRefundedAmount = request.amount();

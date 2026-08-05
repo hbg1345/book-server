@@ -5,11 +5,13 @@ import java.util.UUID;
 
 import com.stripe.StripeClient;
 import com.stripe.exception.ApiException;
+import com.stripe.exception.AuthenticationException;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.Refund;
 import com.stripe.net.RequestOptions;
 import com.stripe.param.PaymentIntentCreateParams;
 import com.stripe.param.RefundCreateParams;
+import com.stripe.service.BalanceService;
 import com.stripe.service.PaymentIntentService;
 import com.stripe.service.RefundService;
 
@@ -134,6 +136,17 @@ class StripePaymentGatewayTest {
         assertThat(params.getValue().getPaymentIntent()).isEqualTo("pi_123");
         assertThat(params.getValue().getAmount()).isEqualTo(3999L);
         assertThat(options.getValue().getIdempotencyKey()).isEqualTo("order-1-refund");
+    }
+
+    // the deploy check reports a refused key as unusable rather than letting the exception out.
+    @Test
+    void credentialsValid_isFalse_whenStripeRefusesTheKey() throws Exception {
+        BalanceService balances = mock(BalanceService.class);
+        when(stripe.balance()).thenReturn(balances);
+        when(balances.retrieve()).thenThrow(
+                new AuthenticationException("bad key", "req_2", "invalid_api_key", 401));
+
+        assertThat(gateway.credentialsValid()).isFalse();
     }
 
     // Stripe reporting the refund as failed is a failed result, so the order is left for a retry.

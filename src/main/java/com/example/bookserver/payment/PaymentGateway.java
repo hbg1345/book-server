@@ -21,4 +21,15 @@ public interface PaymentGateway {
     /** Refund a completed charge. A failure is a {@link RefundResult} with
      *  {@code success=false}, not an exception. */
     RefundResult refund(RefundRequest request);
+
+    /**
+     * Whether the provider accepts this deployment's credentials right now.
+     *
+     * <p>Exists because nothing else proves it. A key is not checked when the client is built, so
+     * a wrong or unreadable one deploys clean, passes health checks, and is discovered by the
+     * first customer who tries to pay. This gives the deploy pipeline something to ask.
+     *
+     * <p>Read-only and cheap by contract — implementations must not create or move anything.
+     */
+    boolean credentialsValid();
 }
