@@ -209,6 +209,36 @@ class StripeWebhookControllerTest {
         verify(purchaseService, never()).markPaymentSucceeded(any(), any());
     }
 
+    // a refund that succeeded is confirmation of something we already recorded when we issued it,
+    // so it must not touch anything — least of all look like a failure.
+    @Test
+    void refundSucceededEvent_isIgnored() throws Exception {
+        String payload = fixture("charge_refund_updated.json");
+
+        postWebhook(payload, signature(payload, SECRET)).andExpect(status().isOk());
+
+        verify(purchaseService, never()).markRefundFailed(any(), any());
+    }
+
+    /**
+     * THE case this event type exists for: Stripe accepted the refund, we told the buyer their
+     * order was refunded, and the money then failed to land. Nothing else in the system finds out.
+     *
+     * <p>The fixture is a real captured event with two values edited — {@code status} to failed and
+     * a documented {@code failure_reason} — because the CLI's fixture only produces a successful
+     * refund and provoking a genuine reversal needs a test clock. The shape is Stripe's; the two
+     * fields are ours.
+     */
+    @Test
+    void refundFailedEvent_marksTheRefundFailed() throws Exception {
+        String payload = fixture("charge_refund_updated_failed.json");
+
+        postWebhook(payload, signature(payload, SECRET)).andExpect(status().isOk());
+
+        verify(purchaseService)
+                .markRefundFailed("pi_3U0xZuIoyUes54I413XWNsVP", "expired_or_canceled_card");
+    }
+
     // a body we genuinely cannot read is the one case worth a 5xx: unlike a wrong amount, a retry
     // after a fix can succeed, and a 200 would throw the payment away for good.
     @Test
