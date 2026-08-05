@@ -329,6 +329,57 @@ public class PurchaseServiceTest {
         assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.ORDERED);
     }
 
+    /**
+     * A refund reversed after the fact marks the payment and nothing else. The buyer has already
+     * been told the order is refunded and the stock is already back, so undoing either would
+     * compound the problem — the payment row is the only honest record that money is still owed.
+     */
+    @Test
+    void markRefundFailed_marksThePayment_andLeavesTheOrderRefunded() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
+        OpenedPayment opened = purchaseService.openPaymentIntent(user, p);
+        String intentId = opened.payment().getProviderTxnId();
+        purchaseService.markPaymentSucceeded(intentId, new BigDecimal("39.99"));
+        purchaseService.cancel(user, p);   // paid -> refunded
+        int stockAfterRefund = bookMapper.findById(book).getInventory();
+
+        purchaseService.markRefundFailed(intentId, "expired_or_canceled_card");
+
+        assertThat(paymentMapper.findByPurchaseUuid(p).getStatus())
+                .isEqualTo(PaymentStatus.REFUND_FAILED);
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState())
+                .isEqualTo(PurchaseState.REFUNDED);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(stockAfterRefund);
+    }
+
+    // Stripe re-delivers webhooks; a second copy must not produce a second anything.
+    @Test
+    void markRefundFailed_isIdempotent() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
+        OpenedPayment opened = purchaseService.openPaymentIntent(user, p);
+        String intentId = opened.payment().getProviderTxnId();
+        purchaseService.markPaymentSucceeded(intentId, new BigDecimal("39.99"));
+        purchaseService.cancel(user, p);
+
+        purchaseService.markRefundFailed(intentId, "expired_or_canceled_card");
+        purchaseService.markRefundFailed(intentId, "expired_or_canceled_card");
+
+        assertThat(paymentMapper.findByPurchaseUuid(p).getStatus())
+                .isEqualTo(PaymentStatus.REFUND_FAILED);
+    }
+
+    // an intent we never opened must not wedge Stripe's retry loop with an exception.
+    @Test
+    void markRefundFailed_ignoresAnUnknownIntent() {
+        purchaseService.markRefundFailed("pi_never_seen", "expired_or_canceled_card");
+    }
+
     // order listing is scoped to the calling user.
     @Test
     void listMyOrders_isScopedToUser() {

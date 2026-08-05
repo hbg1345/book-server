@@ -9,5 +9,12 @@ public enum PaymentStatus {
     PENDING,
     PAID,
     FAILED,
-    REFUNDED
+    REFUNDED,
+    /**
+     * The refund was accepted and then reversed — the bank rejected the credit, the card is
+     * closed. The order stays REFUNDED because the buyer was already told so and their stock was
+     * already returned; only this row records that the money did not actually go back. Terminal:
+     * it needs a human, not a retry.
+     */
+    REFUND_FAILED
 }

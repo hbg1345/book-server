@@ -237,6 +237,36 @@ public class PurchaseService {
         paymentMapper.updateStatus(payment.getPaymentUuid(), PaymentStatus.FAILED);
     }
 
+    /**
+     * The provider reports that a refund it previously accepted has been reversed.
+     *
+     * <p>Refunds are issued synchronously and the order is moved to REFUNDED there and then, but
+     * the money can still fail to land afterwards — a closed card, a bank that rejects the credit.
+     * That arrives here, potentially days later.
+     *
+     * <p>Nothing is rolled back. The buyer has been told the order is refunded and their stock is
+     * already back on the shelf; reversing either would be a second wrong on top of the first. The
+     * payment row records the truth instead, so reconciliation can find the orders where money is
+     * owed, and the log says so loudly because no automatic path fixes this.
+     */
+    @Transactional
+    public void markRefundFailed(String providerIntentId, String reason) {
+        Payment payment = paymentMapper.findByProviderTxnId(providerIntentId);
+        if (payment == null) {
+            log.warn("Ignoring failed-refund webhook for unknown intent {}", providerIntentId);
+            return;
+        }
+        if (payment.getStatus() == PaymentStatus.REFUND_FAILED) {
+            log.debug("Payment {} is already REFUND_FAILED; re-delivered webhook ignored", providerIntentId);
+            return;
+        }
+        paymentMapper.updateStatus(payment.getPaymentUuid(), PaymentStatus.REFUND_FAILED);
+        log.error("Refund reversed for order {} (intent {}, {} {}): the buyer has NOT been repaid "
+                        + "and this needs a manual refund",
+                payment.getPurchaseUuid(), providerIntentId, payment.getAmount(),
+                reason == null ? "no reason given" : reason);
+    }
+
     /** Current state of all of the user's orders, newest first. */
     public List<PurchaseCurrent> listMyOrders(UUID userUuid) {
         return currentMapper.findByUserUuid(userUuid);
