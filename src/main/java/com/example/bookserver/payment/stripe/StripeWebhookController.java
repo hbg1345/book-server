@@ -1,10 +1,12 @@
 package com.example.bookserver.payment.stripe;
 
 import java.math.BigDecimal;
-import java.util.Optional;
 
+import com.stripe.Stripe;
+import com.stripe.exception.EventDataObjectDeserializationException;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.model.Event;
+import com.stripe.model.EventDataObjectDeserializer;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.StripeObject;
 import com.stripe.net.Webhook;
@@ -77,9 +79,9 @@ public class StripeWebhookController {
         }
 
         switch (event.getType()) {
-            case "payment_intent.succeeded" -> paymentIntent(event).ifPresent(this::settle);
+            case "payment_intent.succeeded" -> settle(paymentIntent(event));
             case "payment_intent.payment_failed" ->
-                    paymentIntent(event).ifPresent(intent -> purchaseService.markPaymentFailed(intent.getId()));
+                    purchaseService.markPaymentFailed(paymentIntent(event).getId());
             // we subscribe to a narrow set; anything else is acknowledged so Stripe stops sending it
             default -> log.debug("Ignoring Stripe event of type {}", event.getType());
         }
@@ -107,23 +109,62 @@ public class StripeWebhookController {
     }
 
     /**
-     * The event's payload as a {@link PaymentIntent}. Deserialization can fail when the event was
-     * produced by a different Stripe API version than this library targets, which is a real
-     * possibility after a dashboard-side version bump — so it is handled rather than assumed away.
+     * The event's payload as a {@link PaymentIntent}.
+     *
+     * <p>The typed accessor deliberately returns nothing when the event's API version differs from
+     * the one this library pins, because a renamed or restructured field could otherwise be read as
+     * a silent default. That check fires in normal operation, not just in theory: an account's API
+     * version drifts ahead of the pinned library on Stripe's own schedule, and treating that as
+     * unreadable meant every charge was acknowledged and then dropped — the customer paid and the
+     * order sat unshipped until it expired.
+     *
+     * <p>So a version mismatch falls back to reading the payload anyway. That is sound for the four
+     * fields taken off it — id, currency, amount, amount_received — which have been part of a
+     * payment intent since the object existed; it would not be sound for a field that is new,
+     * deprecated, or reshaped, and any such addition needs this decision revisited.
      */
-    private Optional<PaymentIntent> paymentIntent(Event event) {
-        StripeObject object = event.getDataObjectDeserializer().getObject().orElse(null);
+    private PaymentIntent paymentIntent(Event event) {
+        EventDataObjectDeserializer deserializer = event.getDataObjectDeserializer();
+        StripeObject object = deserializer.getObject().orElseGet(() -> {
+            log.info("Event {} is on API version {} but this build pins {}; reading it leniently",
+                    event.getId(), event.getApiVersion(), Stripe.API_VERSION);
+            try {
+                return deserializer.deserializeUnsafe();
+            } catch (EventDataObjectDeserializationException e) {
+                throw new UnreadableEventException(event, e);
+            }
+        });
         if (object instanceof PaymentIntent intent) {
-            return Optional.of(intent);
+            return intent;
         }
-        log.error("Could not read a PaymentIntent out of event {} ({}); API version mismatch?",
-                event.getId(), event.getType());
-        return Optional.empty();
+        throw new UnreadableEventException(event, null);
     }
 
     /** A webhook with no signature header at all is a bad request, not a server error. */
     @ExceptionHandler(MissingRequestHeaderException.class)
     public ResponseEntity<Void> missingSignature() {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+    }
+
+    /**
+     * An event whose payload cannot be read at all — as opposed to one that is understood and
+     * refused. This is the one failure here worth a 5xx: the cause is on our side, a retry after a
+     * fix can succeed, and Stripe's retries are the only thing keeping the payment recoverable.
+     * Acknowledging it would discard a real charge.
+     */
+    @ExceptionHandler(UnreadableEventException.class)
+    public ResponseEntity<Void> unreadableEvent(UnreadableEventException e) {
+        log.error("Could not read a PaymentIntent out of event {}; asking Stripe to retry",
+                e.eventId, e.getCause());
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+    }
+
+    private static class UnreadableEventException extends RuntimeException {
+        private final String eventId;
+
+        UnreadableEventException(Event event, Throwable cause) {
+            super("unreadable payload on event " + event.getId() + " (" + event.getType() + ")", cause);
+            this.eventId = event.getId();
+        }
     }
 }
