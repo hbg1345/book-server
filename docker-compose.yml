@@ -30,6 +30,11 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-bookpass}
       # dev-only secret; set a real one in prod (>= 32 bytes for HS256)
       JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-jwt-secret-change-me-please!!}
+      # Stripe test-mode keys — REQUIRED, deliberately with no default: there is no fallback
+      # gateway, so the app refuses to start without one rather than booting unable to charge.
+      # Put them in a .env file next to this one (gitignored); see .env.example.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
     ports:
       - "8080:8080"
     restart: unless-stopped
