@@ -3,6 +3,7 @@ package com.example.bookserver.purchase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
@@ -13,13 +14,20 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
+import com.stripe.Stripe;
 import java.time.LocalDate;
 import java.util.List;
 
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.book.BookService;
 import com.example.bookserver.book.dto.BookRequest;
-import com.example.bookserver.payment.ChargeResult;
+import com.example.bookserver.payment.IntentResult;
 import com.example.bookserver.payment.PaymentGateway;
 import com.example.bookserver.payment.PaymentMapper;
 import com.example.bookserver.payment.PaymentStatus;
@@ -56,14 +64,55 @@ class PurchaseControllerIntegrationTest {
     private UserService userService;
     @Autowired
     private PaymentMapper paymentMapper;
-    // Override the declining prod stub with a gateway that approves, so the pay flow can complete.
+    @Value("${stripe.webhook-secret}")
+    private String webhookSecret;
+    // Replace the real Stripe adapter (built from the dummy test key) with a gateway that opens
+    // intents, so payment can complete without reaching Stripe.
     @MockitoBean
     private PaymentGateway paymentGateway;
 
     @BeforeEach
     void approveCharges() {
-        when(paymentGateway.confirm(any())).thenReturn(ChargeResult.paid("txn_it"));
+        when(paymentGateway.provider()).thenReturn("FAKE");
+        when(paymentGateway.openIntent(any())).thenReturn(IntentResult.opened("pi_it", "cs_it"));
         when(paymentGateway.refund(any())).thenReturn(RefundResult.refunded("refund_it"));
+    }
+
+    /**
+     * Pay an order the way a real client does: open the intent over HTTP, then deliver a signed
+     * {@code payment_intent.succeeded} webhook, which is what actually makes the order paid. The
+     * card itself is confirmed browser-to-provider, so no request of ours ever carries it.
+     */
+    private void payOrder(String order, String token, String amount) throws Exception {
+        mockMvc.perform(post("/api/orders/" + order + "/payment-intent")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientSecret").value("cs_it"));
+
+        long cents = new BigDecimal(amount).movePointRight(2).longValueExact();
+        String payload = """
+                {"id":"evt_it","object":"event","api_version":"%s","type":"payment_intent.succeeded",
+                 "data":{"object":{"id":"pi_it","object":"payment_intent",
+                 "amount":%d,"amount_received":%d,"currency":"usd"}}}
+                """.formatted(Stripe.API_VERSION, cents, cents);
+        mockMvc.perform(post("/api/webhooks/stripe")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Stripe-Signature", stripeSignature(payload))
+                        .content(payload))
+                .andExpect(status().isOk());
+    }
+
+    /** Sign a body exactly as Stripe does, with the secret this context was started with. */
+    private String stripeSignature(String payload) throws Exception {
+        long timestamp = Instant.now().getEpochSecond();
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(webhookSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        byte[] hash = mac.doFinal((timestamp + "." + payload).getBytes(StandardCharsets.UTF_8));
+        StringBuilder hex = new StringBuilder();
+        for (byte b : hash) {
+            hex.append(String.format("%02x", b));
+        }
+        return "t=" + timestamp + ",v1=" + hex;
     }
 
     private static final String REGISTER_BODY = """
@@ -139,12 +188,8 @@ class PurchaseControllerIntegrationTest {
                 .andExpect(jsonPath("$.items[0].lineTotal").value(79.98))
                 .andExpect(jsonPath("$.history.length()").value(1));
 
-        // pay -> charge succeeds (fake gateway), ORDERED, payment persisted, timeline grows
-        mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + token)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"provider\":\"TOSS\",\"paymentKey\":\"pk_rt\",\"amount\":79.98}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("PAID"));
+        // pay -> intent opened, then the provider confirms it: ORDERED, payment PAID, timeline grows
+        payOrder(order, token, "79.98");
         assertThat(paymentMapper.findByPurchaseUuid(java.util.UUID.fromString(order)).getStatus())
                 .isEqualTo(PaymentStatus.PAID);   // record persisted for reconciliation
         mockMvc.perform(get("/api/orders/" + order).header("Authorization", "Bearer " + token))
@@ -244,10 +289,7 @@ class PurchaseControllerIntegrationTest {
                 .andExpect(status().isCreated())
                 .andReturn();
         String order = JsonPath.read(placed.getResponse().getContentAsString(), "$.purchaseUuid");
-        mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + buyer)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"provider\":\"TOSS\",\"paymentKey\":\"pk_ff\",\"amount\":39.99}"))
-                .andExpect(status().isOk());   // -> ORDERED
+        payOrder(order, buyer, "39.99");   // -> ORDERED
 
         // the buyer cannot drive fulfillment transitions
         mockMvc.perform(post("/api/orders/" + order + "/prepare").header("Authorization", "Bearer " + buyer))
@@ -295,10 +337,7 @@ class PurchaseControllerIntegrationTest {
                 .andReturn();
         String order = JsonPath.read(placed.getResponse().getContentAsString(), "$.purchaseUuid");
 
-        mockMvc.perform(post("/api/orders/" + order + "/pay").header("Authorization", "Bearer " + buyer)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"provider\":\"TOSS\",\"paymentKey\":\"pk_ret\",\"amount\":39.99}"))
-                .andExpect(status().isOk());
+        payOrder(order, buyer, "39.99");
         mockMvc.perform(get("/api/books/" + book)).andExpect(jsonPath("$.inventory").value(9));   // reserved
 
         // admin fulfills through to delivered

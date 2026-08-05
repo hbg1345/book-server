@@ -118,6 +118,20 @@ public class PaymentMapperTest {
         assertThat(paymentMapper.findByIdempotencyKey("missing")).isNull();
     }
 
+    // Verifies: findByProviderTxnId resolves the provider's intent id back to our payment —
+    // the lookup a webhook does, since the provider only knows its own id.
+    @Test
+    void findByProviderTxnId_returnsRow() {
+        UUID user = persistUser();
+        UUID order = persistOrder(user);
+        paymentMapper.insert(payment(order, "idem-webhook", PaymentStatus.PENDING));
+
+        Payment found = paymentMapper.findByProviderTxnId("txn_123");
+        assertThat(found).isNotNull();
+        assertThat(found.getPurchaseUuid()).isEqualTo(order);
+        assertThat(paymentMapper.findByProviderTxnId("pi_unknown")).isNull();
+    }
+
     // Verifies: the idempotency key is unique — the same key cannot be inserted twice
     // (the DB backstop against a double charge).
     @Test

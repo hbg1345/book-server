@@ -19,7 +19,8 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import com.example.bookserver.address.AddressNotFoundException;
 import com.example.bookserver.payment.Payment;
-import com.example.bookserver.payment.PaymentAmountMismatchException;
+import com.example.bookserver.payment.OpenedPayment;
+import com.example.bookserver.payment.PaymentIntentFailedException;
 import com.example.bookserver.payment.PaymentStatus;
 import com.example.bookserver.payment.RefundFailedException;
 import com.example.bookserver.auth.JwtProvider;
@@ -264,92 +265,71 @@ class PurchaseControllerWebMvcTest {
                 .andExpect(status().isNotFound());
     }
 
-    // pay: 200; delegates to the service.
-    private static final String PAY_BODY = """
-            {"provider":"TOSS","paymentKey":"pk_test_123","amount":79.98}
-            """;
-
     private static Payment payment(UUID purchase, PaymentStatus status) {
-        return new Payment(UUID.randomUUID(), purchase, "TOSS", "txn_1",
-                new BigDecimal("79.98"), status, "pk_test_123", null, null);
+        return new Payment(UUID.randomUUID(), purchase, "STRIPE", "pi_1",
+                new BigDecimal("79.98"), status, "order-" + purchase, null, null);
     }
 
-    // pay: 200 with the payment result; delegates to the service.
+    // payment-intent: 200 with the client secret; delegates to the service. No request body —
+    // the amount is the server's own order total.
     @Test
-    void pay_returns200AndPayment_onSuccess() throws Exception {
+    void openPaymentIntent_returns200AndClientSecret() throws Exception {
         UUID user = UUID.randomUUID();
         UUID purchase = UUID.randomUUID();
-        when(purchaseService.pay(eq(user), eq(purchase), any())).thenReturn(payment(purchase, PaymentStatus.PAID));
+        when(purchaseService.openPaymentIntent(user, purchase))
+                .thenReturn(new OpenedPayment(payment(purchase, PaymentStatus.PENDING), "cs_test_123"));
 
-        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
-                        .contentType(MediaType.APPLICATION_JSON).content(PAY_BODY))
+        mockMvc.perform(post("/api/orders/" + purchase + "/payment-intent").with(asUser(user)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("PAID"))
+                .andExpect(jsonPath("$.clientSecret").value("cs_test_123"))
+                .andExpect(jsonPath("$.amount").value(79.98))
                 .andExpect(jsonPath("$.paymentUuid").exists())
-                .andDo(document("order-pay",
-                        requestFields(
-                                fieldWithPath("provider").description("Payment provider the frontend used, e.g. TOSS"),
-                                fieldWithPath("paymentKey").description("Provider key for the authorized charge (also the idempotency key)"),
-                                fieldWithPath("amount").description("Client's claimed total; verified server-side against the order total")),
+                .andDo(document("order-payment-intent",
                         responseFields(
                                 fieldWithPath("paymentUuid").description("Payment record id"),
-                                fieldWithPath("status").description("Payment status (PAID)"),
-                                fieldWithPath("providerTxnId").description("Provider transaction id"),
-                                fieldWithPath("amount").description("Charged amount"))));
+                                fieldWithPath("clientSecret").description(
+                                        "Provider client secret the frontend confirms the card with"),
+                                fieldWithPath("amount").description(
+                                        "Server-computed order total that will be charged"))));
 
-        verify(purchaseService).pay(eq(user), eq(purchase), any());
+        verify(purchaseService).openPaymentIntent(user, purchase);
     }
 
-    // a declined charge -> 402 Payment Required.
+    // opening an intent on an order that is not awaiting payment -> 409.
     @Test
-    void pay_returns402_whenDeclined() throws Exception {
-        UUID user = UUID.randomUUID();
-        UUID purchase = UUID.randomUUID();
-        when(purchaseService.pay(eq(user), eq(purchase), any())).thenReturn(payment(purchase, PaymentStatus.FAILED));
-
-        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
-                        .contentType(MediaType.APPLICATION_JSON).content(PAY_BODY))
-                .andExpect(status().isPaymentRequired());
-    }
-
-    // an invalid body (missing paymentKey/amount) -> 400; service untouched.
-    @Test
-    void pay_returns400_whenBodyInvalid() throws Exception {
-        UUID user = UUID.randomUUID();
-        UUID purchase = UUID.randomUUID();
-
-        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"provider\":\"TOSS\"}"))
-                .andExpect(status().isBadRequest());
-        verify(purchaseService, never()).pay(any(), any(), any());
-    }
-
-    // charge amount not matching the order total -> 400.
-    @Test
-    void pay_returns400_whenAmountMismatch() throws Exception {
-        UUID user = UUID.randomUUID();
-        UUID purchase = UUID.randomUUID();
-        doThrow(new PaymentAmountMismatchException(new BigDecimal("79.98"), new BigDecimal("9.99")))
-                .when(purchaseService).pay(eq(user), eq(purchase), any());
-
-        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
-                        .contentType(MediaType.APPLICATION_JSON).content(PAY_BODY))
-                .andExpect(status().isBadRequest());
-    }
-
-    // pay an order that is not pending -> 409.
-    @Test
-    void pay_returns409_whenNotPending() throws Exception {
+    void openPaymentIntent_returns409_whenNotPending() throws Exception {
         UUID user = UUID.randomUUID();
         UUID purchase = UUID.randomUUID();
         doThrow(new IllegalOrderStateException("not pending"))
-                .when(purchaseService).pay(eq(user), eq(purchase), any());
+                .when(purchaseService).openPaymentIntent(user, purchase);
 
-        mockMvc.perform(post("/api/orders/" + purchase + "/pay").with(asUser(user))
-                        .contentType(MediaType.APPLICATION_JSON).content(PAY_BODY))
+        mockMvc.perform(post("/api/orders/" + purchase + "/payment-intent").with(asUser(user)))
                 .andExpect(status().isConflict());
     }
 
+    // the provider refusing to open an intent -> 502 (our side failed, not the caller's).
+    @Test
+    void openPaymentIntent_returns502_whenProviderFails() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        doThrow(new PaymentIntentFailedException(purchase, "provider_unavailable"))
+                .when(purchaseService).openPaymentIntent(user, purchase);
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/payment-intent").with(asUser(user)))
+                .andExpect(status().isBadGateway());
+    }
+
+    // an intent on a missing / others' order -> 404.
+    @Test
+    void openPaymentIntent_returns404_whenNotFound() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        doThrow(new OrderNotFoundException(purchase))
+                .when(purchaseService).openPaymentIntent(user, purchase);
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/payment-intent").with(asUser(user)))
+                .andExpect(status().isNotFound());
+    }
     // cancel: 200; delegates to the service.
     @Test
     void cancel_delegatesToService() throws Exception {

@@ -15,11 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.bookserver.purchase.dto.OrderDetailResponse;
 import com.example.bookserver.purchase.dto.OrderSummaryResponse;
-import com.example.bookserver.payment.Payment;
-import com.example.bookserver.payment.PaymentDeclinedException;
-import com.example.bookserver.payment.PaymentStatus;
-import com.example.bookserver.purchase.dto.PayRequest;
-import com.example.bookserver.purchase.dto.PaymentResponse;
+import com.example.bookserver.purchase.dto.PaymentIntentResponse;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderResponse;
 import com.example.bookserver.purchase.dto.ShipOrderRequest;
@@ -67,14 +63,15 @@ public class PurchaseController {
         return OrderDetailResponse.from(purchaseService.getOrder(userUuid, purchaseUuid));
     }
 
-    @PostMapping("/{purchaseUuid}/pay")
-    public PaymentResponse pay(@AuthenticationPrincipal UUID userUuid, @PathVariable UUID purchaseUuid,
-                               @Valid @RequestBody PayRequest request) {
-        Payment payment = purchaseService.pay(userUuid, purchaseUuid, request);
-        if (payment.getStatus() != PaymentStatus.PAID) {
-            throw new PaymentDeclinedException(purchaseUuid);   // charge declined -> 402, order stays unpaid
-        }
-        return PaymentResponse.from(payment);
+    /**
+     * Open a payment intent for the order. Takes no body: the amount is the server's own order
+     * total. The response carries the client secret the frontend confirms the card with; the
+     * order only becomes ORDERED once the provider's webhook reports the charge succeeded.
+     */
+    @PostMapping("/{purchaseUuid}/payment-intent")
+    public PaymentIntentResponse openPaymentIntent(@AuthenticationPrincipal UUID userUuid,
+                                                   @PathVariable UUID purchaseUuid) {
+        return PaymentIntentResponse.from(purchaseService.openPaymentIntent(userUuid, purchaseUuid));
     }
 
     @PostMapping("/{purchaseUuid}/cancel")
