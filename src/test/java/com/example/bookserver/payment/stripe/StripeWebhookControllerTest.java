@@ -58,8 +58,29 @@ class StripeWebhookControllerTest {
     private JwtProvider jwtProvider;   // the security filter chain wants one
 
     /**
-     * A payment_intent event body. The API version must match the library's, or Stripe's
-     * deserializer refuses to hand back a typed object.
+     * A real event as Stripe sent it, captured from a test-mode account with the CLI and committed
+     * under {@code src/test/resources/stripe}. These exist because the hand-written bodies below
+     * cannot catch a payload-shape problem: they stamp {@link Stripe#API_VERSION} into the event,
+     * so they agree with the library by construction no matter what Stripe actually sends. A real
+     * account's events carry the version configured on the account, which drifts ahead of the
+     * pinned library — and did, silently breaking every payment until it was caught here.
+     *
+     * <p>Re-capture with: {@code stripe trigger payment_intent.succeeded} then
+     * {@code stripe events retrieve <evt_id>}.
+     */
+    private static String fixture(String name) throws Exception {
+        try (var in = StripeWebhookControllerTest.class.getResourceAsStream("/stripe/" + name)) {
+            if (in == null) {
+                throw new IllegalStateException("missing Stripe fixture: " + name);
+            }
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    /**
+     * A payment_intent event body. The API version is stamped as the library's own, which keeps
+     * these focused on the handler's logic — for the payload as Stripe really sends it, and the
+     * version skew that comes with it, see the fixture-backed tests.
      */
     private static String eventJson(String type, String intentId, long amount, String currency) {
         return """
@@ -161,6 +182,47 @@ class StripeWebhookControllerTest {
                 .when(purchaseService).markPaymentSucceeded(eq("pi_7"), any());
 
         postWebhook(payload, signature(payload, SECRET)).andExpect(status().isOk());
+    }
+
+    // THE regression test: a genuine Stripe event, whose api_version is newer than the pinned
+    // library's, still settles the payment. Before this the typed deserializer returned nothing on
+    // any version skew, so every real charge was acknowledged and then dropped — paid, never shipped.
+    @Test
+    void realSucceededEvent_withNewerApiVersion_stillSettles() throws Exception {
+        String payload = fixture("payment_intent_succeeded.json");
+
+        postWebhook(payload, signature(payload, SECRET)).andExpect(status().isOk());
+
+        verify(purchaseService)
+                .markPaymentSucceeded("pi_3U0uyHIoyUes54I42tcLehex", new BigDecimal("20.00"));
+    }
+
+    // the same skew must not swallow failures either, or a declined card leaves the order hanging
+    // until the expiry sweep instead of being marked failed straight away.
+    @Test
+    void realFailedEvent_withNewerApiVersion_stillRecordsFailure() throws Exception {
+        String payload = fixture("payment_intent_payment_failed.json");
+
+        postWebhook(payload, signature(payload, SECRET)).andExpect(status().isOk());
+
+        verify(purchaseService).markPaymentFailed("pi_3U0v7TIoyUes54I42wjUHTFJ");
+        verify(purchaseService, never()).markPaymentSucceeded(any(), any());
+    }
+
+    // a body we genuinely cannot read is the one case worth a 5xx: unlike a wrong amount, a retry
+    // after a fix can succeed, and a 200 would throw the payment away for good.
+    @Test
+    void unreadablePayload_is5xx_soStripeRetries() throws Exception {
+        // well-formed, and on an unknown future version, but the payload is not a payment intent
+        String payload = """
+                {"id":"evt_broken","object":"event","api_version":"2099-01-01.zinnia",
+                 "type":"payment_intent.succeeded",
+                 "data":{"object":{"id":"cus_1","object":"customer"}}}
+                """;
+
+        postWebhook(payload, signature(payload, SECRET)).andExpect(status().is5xxServerError());
+
+        verify(purchaseService, never()).markPaymentSucceeded(any(), any());
     }
 
     // an unsubscribed event type is acknowledged and ignored.
