@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,17 +20,18 @@ import com.example.bookserver.book.BookMapper;
 import com.example.bookserver.cart.CartItemView;
 import com.example.bookserver.cart.CartService;
 import com.example.bookserver.common.Uuids;
-import com.example.bookserver.payment.ChargeRequest;
-import com.example.bookserver.payment.ChargeResult;
+import com.example.bookserver.payment.IntentRequest;
+import com.example.bookserver.payment.IntentResult;
+import com.example.bookserver.payment.OpenedPayment;
 import com.example.bookserver.payment.Payment;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
 import com.example.bookserver.payment.PaymentGateway;
+import com.example.bookserver.payment.PaymentIntentFailedException;
 import com.example.bookserver.payment.PaymentMapper;
 import com.example.bookserver.payment.PaymentStatus;
 import com.example.bookserver.payment.RefundFailedException;
 import com.example.bookserver.payment.RefundRequest;
 import com.example.bookserver.payment.RefundResult;
-import com.example.bookserver.purchase.dto.PayRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 
 /**
@@ -40,6 +43,8 @@ import com.example.bookserver.purchase.dto.PlaceOrderRequest;
  */
 @Service
 public class PurchaseService {
+
+    private static final Logger log = LoggerFactory.getLogger(PurchaseService.class);
 
     /** An order may only be cancelled before it starts being prepared. */
     private static final Set<PurchaseState> CANCELLABLE =
@@ -137,42 +142,99 @@ public class PurchaseService {
     }
 
     /**
-     * Charge the order and, on success, advance it {@code PAYMENT_PENDING -> ORDERED}. The
-     * charge amount is verified server-side against the order total (a mismatch is rejected
-     * before the gateway is touched) and the payment key is used as the idempotency key, so a
-     * retry with the same key returns the existing charge instead of charging again. A declined
-     * charge records a FAILED payment and leaves the order unpaid. Returns the payment record.
+     * Open a payment intent for the order and return it with the provider's client secret, which
+     * the frontend uses to confirm the card directly with the provider.
+     *
+     * <p>The order does NOT advance here: the card is authorized between the browser and the
+     * provider, and the result reaches us as a webhook, which is what moves
+     * {@code PAYMENT_PENDING -> ORDERED}. The amount is the server's own order total — the client
+     * never supplies one, so there is nothing to tamper with. The idempotency key is order-scoped,
+     * so a retry replays the same intent (and the same secret) rather than opening a second one.
      */
     @Transactional
-    public Payment pay(UUID userUuid, UUID purchaseUuid, PayRequest req) {
+    public OpenedPayment openPaymentIntent(UUID userUuid, UUID purchaseUuid) {
         PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
-
-        // idempotent replay: the same payment key resolves to its existing charge, no re-charge
-        Payment existing = paymentMapper.findByIdempotencyKey(req.paymentKey());
-        if (existing != null) {
-            return existing;
-        }
-
         requireState(current, PurchaseState.PAYMENT_PENDING);
 
-        BigDecimal orderTotal = current.getPrice();
-        if (req.amount().compareTo(orderTotal) != 0) {
-            throw new PaymentAmountMismatchException(orderTotal, req.amount());   // never trust the client
+        String idempotencyKey = intentKey(purchaseUuid);
+        IntentResult result = paymentGateway.openIntent(
+                new IntentRequest(purchaseUuid, current.getPrice(), idempotencyKey));
+        if (!result.success()) {
+            throw new PaymentIntentFailedException(purchaseUuid, result.failureReason());
         }
 
-        ChargeResult result = paymentGateway.confirm(new ChargeRequest(
-                purchaseUuid, orderTotal, "KRW", req.paymentKey(), req.paymentKey()));
+        // one payment row per order: a retry finds the row the first call inserted
+        Payment payment = paymentMapper.findByIdempotencyKey(idempotencyKey);
+        if (payment == null) {
+            payment = new Payment(Uuids.newId(), purchaseUuid, paymentGateway.provider(),
+                    result.providerIntentId(), current.getPrice(), PaymentStatus.PENDING,
+                    idempotencyKey, null, null);
+            paymentMapper.insert(payment);
+        }
+        return new OpenedPayment(payment, result.clientSecret());
+    }
 
-        Payment payment = new Payment(Uuids.newId(), purchaseUuid, req.provider(),
-                result.providerTransactionId(), orderTotal,
-                result.success() ? PaymentStatus.PAID : PaymentStatus.FAILED,
-                req.paymentKey(), null, null);
-        paymentMapper.insert(payment);
+    /** Order-scoped idempotency key: the dedup unit for both the provider and our payment row. */
+    private static String intentKey(UUID purchaseUuid) {
+        return "order-" + purchaseUuid;
+    }
 
-        if (result.success()) {
+    /**
+     * The provider reports a confirmed charge: mark the payment PAID and advance the order
+     * {@code PAYMENT_PENDING -> ORDERED}. This is the only path that makes an order paid — the
+     * browser's word is never taken for it.
+     *
+     * <p>Deliberately idempotent, because providers re-deliver webhooks: an already-PAID payment
+     * is a no-op, and the order only transitions if it is still awaiting payment. An unknown
+     * intent is ignored rather than failing, so a webhook for something we never opened (or that
+     * was already cleaned up) does not wedge the provider's retry loop. The charged amount is
+     * re-checked against the order total here — the last point where a mismatch can be caught.
+     */
+    @Transactional
+    public void markPaymentSucceeded(String providerIntentId, BigDecimal chargedAmount) {
+        Payment payment = paymentMapper.findByProviderTxnId(providerIntentId);
+        if (payment == null) {
+            // not an error we can act on, but it means the provider charged something we have no
+            // record of — worth a loud line rather than a silent return
+            log.warn("Ignoring succeeded-payment webhook for unknown intent {}", providerIntentId);
+            return;
+        }
+        if (payment.getStatus() == PaymentStatus.PAID) {
+            log.debug("Payment {} is already PAID; re-delivered webhook ignored", providerIntentId);
+            return;
+        }
+        if (chargedAmount.compareTo(payment.getAmount()) != 0) {
+            throw new PaymentAmountMismatchException(payment.getAmount(), chargedAmount);
+        }
+        paymentMapper.updateStatus(payment.getPaymentUuid(), PaymentStatus.PAID);
+
+        PurchaseCurrent current = currentMapper.findByPurchaseUuid(payment.getPurchaseUuid());
+        if (current != null && current.getPurchaseState() == PurchaseState.PAYMENT_PENDING) {
             transition(current, PurchaseState.ORDERED);
         }
-        return payment;
+    }
+
+    /**
+     * The provider reports a failed charge: record it for audit and leave the order at
+     * {@code PAYMENT_PENDING} so the customer can retry on the same intent (or let it expire).
+     * Idempotent and tolerant of unknown intents, for the same reasons as
+     * {@link #markPaymentSucceeded}.
+     */
+    @Transactional
+    public void markPaymentFailed(String providerIntentId) {
+        Payment payment = paymentMapper.findByProviderTxnId(providerIntentId);
+        if (payment == null) {
+            log.warn("Ignoring failed-payment webhook for unknown intent {}", providerIntentId);
+            return;
+        }
+        if (payment.getStatus() != PaymentStatus.PENDING) {
+            // a "failed" arriving after the payment already settled is out-of-order delivery, not
+            // a reason to undo it — but it should be visible if it starts happening
+            log.warn("Ignoring failed-payment webhook for {}: payment is already {}",
+                    providerIntentId, payment.getStatus());
+            return;
+        }
+        paymentMapper.updateStatus(payment.getPaymentUuid(), PaymentStatus.FAILED);
     }
 
     /** Current state of all of the user's orders, newest first. */

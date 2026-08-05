@@ -20,7 +20,7 @@ import com.example.bookserver.auth.InvalidRefreshTokenException;
 import com.example.bookserver.book.BookNotFoundException;
 import com.example.bookserver.cart.CartItemNotFoundException;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
-import com.example.bookserver.payment.PaymentDeclinedException;
+import com.example.bookserver.payment.PaymentIntentFailedException;
 import com.example.bookserver.payment.RefundFailedException;
 import com.example.bookserver.purchase.EmptyCartException;
 import com.example.bookserver.purchase.IllegalOrderStateException;
@@ -99,16 +99,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
 
-    /** The charge amount did not match the order total (client tampering). */
+    /** The confirmed charge did not match the order total (reported by the provider's webhook). */
     @ExceptionHandler(PaymentAmountMismatchException.class)
     public ProblemDetail handlePaymentAmountMismatch(PaymentAmountMismatchException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
-    /** The gateway declined the charge; the order remains unpaid. */
-    @ExceptionHandler(PaymentDeclinedException.class)
-    public ProblemDetail handlePaymentDeclined(PaymentDeclinedException ex) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.PAYMENT_REQUIRED, ex.getMessage());
+    /** The provider would not open a payment intent; nothing was charged, the caller may retry. */
+    @ExceptionHandler(PaymentIntentFailedException.class)
+    public ProblemDetail handlePaymentIntentFailed(PaymentIntentFailedException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
     }
 
     /** The gateway could not refund; the order is left unchanged for a retry. */

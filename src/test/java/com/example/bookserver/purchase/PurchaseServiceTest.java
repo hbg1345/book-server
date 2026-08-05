@@ -23,12 +23,13 @@ import com.example.bookserver.cart.CartItemMapper;
 import com.example.bookserver.cart.CartService;
 import com.example.bookserver.common.Uuids;
 import com.example.bookserver.payment.FakePaymentGateway;
+import com.example.bookserver.payment.OpenedPayment;
 import com.example.bookserver.payment.Payment;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
+import com.example.bookserver.payment.PaymentIntentFailedException;
 import com.example.bookserver.payment.PaymentMapper;
 import com.example.bookserver.payment.PaymentStatus;
 import com.example.bookserver.payment.RefundFailedException;
-import com.example.bookserver.purchase.dto.PayRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest.InlineAddress;
 import com.example.bookserver.user.User;
@@ -73,9 +74,13 @@ public class PurchaseServiceTest {
                 orderAddressMapper, addressMapper, paymentMapper, gateway, bookMapper, cartService);
     }
 
-    /** A pay request for the given order total, with a unique payment key. */
-    private static PayRequest payFor(UUID purchaseUuid, String amount) {
-        return new PayRequest("TOSS", "pk-" + purchaseUuid, new BigDecimal(amount));
+    /**
+     * Drive an order all the way through payment: open the intent, then settle it the way the
+     * provider's webhook would. Leaves the order ORDERED with a PAID payment.
+     */
+    private void payFor(UUID userUuid, UUID purchaseUuid, String amount) {
+        OpenedPayment opened = purchaseService.openPaymentIntent(userUuid, purchaseUuid);
+        purchaseService.markPaymentSucceeded(opened.payment().getProviderTxnId(), new BigDecimal(amount));
     }
 
     /** A minimal valid order request with a one-off inline delivery address. */
@@ -164,105 +169,163 @@ public class PurchaseServiceTest {
         assertThat(bookMapper.findById(book).getInventory()).isEqualTo(1);   // untouched
     }
 
-    // paying a pending order advances it to ORDERED and appends a new state event.
+    // --- payment intent (#25) ---
+
+    // opening an intent persists a PENDING payment for the SERVER's order total and returns the
+    // client secret — but does NOT advance the order: only the provider's webhook can do that.
     @Test
-    void pay_advancesPendingToOrdered() {
+    void openPaymentIntent_persistsPendingPayment_andLeavesOrderPending() {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 1);
-        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
 
-        purchaseService.pay(user, purchaseUuid, payFor(purchaseUuid, "39.99"));
+        OpenedPayment opened = purchaseService.openPaymentIntent(user, p);
 
-        assertThat(currentMapper.findByPurchaseUuid(purchaseUuid).getPurchaseState())
-                .isEqualTo(PurchaseState.ORDERED);
-        assertThat(historyMapper.findAllByPurchaseUuid(purchaseUuid)).hasSize(2);   // PENDING + ORDERED
+        assertThat(opened.clientSecret()).isNotBlank();
+        assertThat(opened.payment().getStatus()).isEqualTo(PaymentStatus.PENDING);
+        Payment saved = paymentMapper.findByPurchaseUuid(p);
+        assertThat(saved.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(saved.getProvider()).isEqualTo("FAKE");
+        assertThat(saved.getProviderTxnId()).isNotBlank();
+        assertThat(saved.getAmount()).isEqualByComparingTo("39.99");
+        assertThat(gateway.lastIntentAmount()).isEqualByComparingTo("39.99");   // server total
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState())
+                .isEqualTo(PurchaseState.PAYMENT_PENDING);
+        assertThat(historyMapper.findAllByPurchaseUuid(p)).hasSize(1);   // no new state event
     }
 
-    // paying an order that is not pending is rejected.
+    // re-opening the intent for the same order replays the one intent and inserts no second row.
     @Test
-    void pay_throws_whenNotPending() {
+    void openPaymentIntent_retry_reusesTheSameIntent() {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 1);
-        UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
-        purchaseService.pay(user, purchaseUuid, payFor(purchaseUuid, "39.99"));   // now ORDERED
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
 
-        // a fresh payment attempt (different key) on an already-paid order is rejected
-        PayRequest another = new PayRequest("TOSS", "pk-second-" + purchaseUuid, new BigDecimal("39.99"));
-        assertThatThrownBy(() -> purchaseService.pay(user, purchaseUuid, another))
+        OpenedPayment first = purchaseService.openPaymentIntent(user, p);
+        OpenedPayment retry = purchaseService.openPaymentIntent(user, p);
+
+        assertThat(retry.payment().getPaymentUuid()).isEqualTo(first.payment().getPaymentUuid());
+        assertThat(retry.clientSecret()).isEqualTo(first.clientSecret());   // provider replayed it
+    }
+
+    // an order that is no longer awaiting payment cannot open an intent.
+    @Test
+    void openPaymentIntent_throws_whenNotPending() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
+        payFor(user, p, "39.99");   // now ORDERED
+
+        assertThatThrownBy(() -> purchaseService.openPaymentIntent(user, p))
                 .isInstanceOf(IllegalOrderStateException.class);
     }
 
-    // --- payment / charge (#25) ---
-
-    // paying charges the gateway (with the SERVER's order total), persists a PAID payment, and
-    // advances the order to ORDERED.
+    // a provider that will not open an intent surfaces as an error and persists nothing.
     @Test
-    void pay_charges_persistsPaidPayment_andAdvances() {
+    void openPaymentIntent_providerFailure_persistsNothing() {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 1);
         UUID p = purchaseService.placeOrder(user, inlineOrder());
+        gateway.setOpenSucceed(false);
 
-        Payment result = purchaseService.pay(user, p, payFor(p, "39.99"));
+        assertThatThrownBy(() -> purchaseService.openPaymentIntent(user, p))
+                .isInstanceOf(PaymentIntentFailedException.class);
+        assertThat(paymentMapper.findByPurchaseUuid(p)).isNull();
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState())
+                .isEqualTo(PurchaseState.PAYMENT_PENDING);
+    }
 
-        assertThat(result.getStatus()).isEqualTo(PaymentStatus.PAID);
+    // --- webhook settlement (#25) ---
+
+    // a confirmed charge marks the payment PAID and advances the order to ORDERED.
+    @Test
+    void markPaymentSucceeded_marksPaid_andAdvancesOrder() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
+        OpenedPayment opened = purchaseService.openPaymentIntent(user, p);
+
+        purchaseService.markPaymentSucceeded(opened.payment().getProviderTxnId(), new BigDecimal("39.99"));
+
+        assertThat(paymentMapper.findByPurchaseUuid(p).getStatus()).isEqualTo(PaymentStatus.PAID);
         assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.ORDERED);
-        Payment saved = paymentMapper.findByPurchaseUuid(p);
-        assertThat(saved.getStatus()).isEqualTo(PaymentStatus.PAID);
-        assertThat(saved.getProvider()).isEqualTo("TOSS");
-        assertThat(saved.getProviderTxnId()).isNotBlank();
-        assertThat(saved.getAmount()).isEqualByComparingTo("39.99");
-        assertThat(gateway.chargeCount()).isEqualTo(1);
-        assertThat(gateway.lastChargedAmount()).isEqualByComparingTo("39.99");   // server total, not client's
+        assertThat(historyMapper.findAllByPurchaseUuid(p)).hasSize(2);   // PENDING + ORDERED
     }
 
-    // a declined charge leaves the order at PAYMENT_PENDING and records a FAILED payment (audit).
+    // providers re-deliver webhooks: a second delivery must not append a second ORDERED event.
     @Test
-    void pay_chargeFailure_staysPending_recordsFailed() {
+    void markPaymentSucceeded_isIdempotent() {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 1);
         UUID p = purchaseService.placeOrder(user, inlineOrder());
-        gateway.setSucceed(false);
+        OpenedPayment opened = purchaseService.openPaymentIntent(user, p);
+        String intentId = opened.payment().getProviderTxnId();
 
-        Payment result = purchaseService.pay(user, p, payFor(p, "39.99"));
+        purchaseService.markPaymentSucceeded(intentId, new BigDecimal("39.99"));
+        purchaseService.markPaymentSucceeded(intentId, new BigDecimal("39.99"));   // re-delivered
 
-        assertThat(result.getStatus()).isEqualTo(PaymentStatus.FAILED);
-        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.PAYMENT_PENDING);
-        assertThat(paymentMapper.findByPurchaseUuid(p).getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.ORDERED);
+        assertThat(historyMapper.findAllByPurchaseUuid(p)).hasSize(2);   // still just PENDING + ORDERED
     }
 
-    // a charge amount that does not match the order total is rejected before the gateway is touched.
+    // a charge for the wrong amount is refused — the last place tampering can be caught.
     @Test
-    void pay_amountMismatch_isRejected_andNeverCharges() {
+    void markPaymentSucceeded_amountMismatch_isRejected() {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 1);
         UUID p = purchaseService.placeOrder(user, inlineOrder());
+        OpenedPayment opened = purchaseService.openPaymentIntent(user, p);
 
-        PayRequest tampered = new PayRequest("TOSS", "pk-tamper", new BigDecimal("9.99"));   // != 39.99
-        assertThatThrownBy(() -> purchaseService.pay(user, p, tampered))
+        assertThatThrownBy(() -> purchaseService.markPaymentSucceeded(
+                opened.payment().getProviderTxnId(), new BigDecimal("9.99")))
                 .isInstanceOf(PaymentAmountMismatchException.class);
-        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.PAYMENT_PENDING);
-        assertThat(gateway.chargeCount()).isZero();
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState())
+                .isEqualTo(PurchaseState.PAYMENT_PENDING);
     }
 
-    // retrying pay with the same idempotency key does not charge twice.
+    // a webhook for an intent we never opened is ignored, not an error (it would be retried forever).
     @Test
-    void pay_idempotentRetry_doesNotDoubleCharge() {
+    void markPaymentSucceeded_unknownIntent_isIgnored() {
+        purchaseService.markPaymentSucceeded("pi_never_seen", new BigDecimal("39.99"));
+    }
+
+    // a failed charge is recorded for audit and leaves the order payable.
+    @Test
+    void markPaymentFailed_recordsFailure_andLeavesOrderPending() {
         UUID user = persistUser();
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 1);
         UUID p = purchaseService.placeOrder(user, inlineOrder());
-        PayRequest req = payFor(p, "39.99");   // same key on both calls
+        OpenedPayment opened = purchaseService.openPaymentIntent(user, p);
 
-        purchaseService.pay(user, p, req);
-        Payment retry = purchaseService.pay(user, p, req);   // idempotent replay
+        purchaseService.markPaymentFailed(opened.payment().getProviderTxnId());
 
-        assertThat(retry.getStatus()).isEqualTo(PaymentStatus.PAID);
-        assertThat(gateway.chargeCount()).isEqualTo(1);   // charged exactly once
+        assertThat(paymentMapper.findByPurchaseUuid(p).getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState())
+                .isEqualTo(PurchaseState.PAYMENT_PENDING);
+    }
+
+    // a late "failed" delivery must never undo a payment that already succeeded.
+    @Test
+    void markPaymentFailed_doesNotDowngradeAPaidPayment() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Architecture", "39.99", 10);
+        cartService.addItem(user, book, 1);
+        UUID p = purchaseService.placeOrder(user, inlineOrder());
+        OpenedPayment opened = purchaseService.openPaymentIntent(user, p);
+        String intentId = opened.payment().getProviderTxnId();
+        purchaseService.markPaymentSucceeded(intentId, new BigDecimal("39.99"));
+
+        purchaseService.markPaymentFailed(intentId);   // arrives out of order
+
+        assertThat(paymentMapper.findByPurchaseUuid(p).getStatus()).isEqualTo(PaymentStatus.PAID);
         assertThat(currentMapper.findByPurchaseUuid(p).getPurchaseState()).isEqualTo(PurchaseState.ORDERED);
     }
 
@@ -353,7 +416,7 @@ public class PurchaseServiceTest {
         UUID pending = purchaseService.placeOrder(user, inlineOrder());         // stays PAYMENT_PENDING
         cartService.addItem(user, book, 1);
         UUID paid = purchaseService.placeOrder(user, inlineOrder());
-        purchaseService.pay(user, paid, payFor(paid, "39.99"));   // now ORDERED, not pending
+        payFor(user, paid, "39.99");   // now ORDERED, not pending
 
         // a cutoff in the future treats the just-placed order as stale; the paid one is excluded by state
         assertThat(purchaseService.findUnpaidOrdersBefore(LocalDateTime.now().plusMinutes(1)))
@@ -386,7 +449,7 @@ public class PurchaseServiceTest {
         UUID book = persistBook("Clean Architecture", "39.99", 10);
         cartService.addItem(user, book, 2);
         UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());   // inventory now 8
-        purchaseService.pay(user, purchaseUuid, payFor(purchaseUuid, "79.98"));   // ORDERED
+        payFor(user, purchaseUuid, "79.98");   // ORDERED
 
         purchaseService.expireUnpaidOrder(purchaseUuid);
 
@@ -481,7 +544,7 @@ public class PurchaseServiceTest {
         cartService.addItem(user, book, 1);
         UUID purchaseUuid = purchaseService.placeOrder(user, inlineOrder());
         BigDecimal total = currentMapper.findByPurchaseUuid(purchaseUuid).getPrice();
-        purchaseService.pay(user, purchaseUuid, payFor(purchaseUuid, total.toPlainString()));   // -> ORDERED
+        payFor(user, purchaseUuid, total.toPlainString());   // -> ORDERED
         return purchaseUuid;
     }
 

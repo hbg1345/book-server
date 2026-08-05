@@ -45,6 +45,7 @@ dependencies {
     testImplementation 'com.epages:restdocs-api-spec-mockmvc:0.20.1'   // wraps document() to also emit OpenAPI
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
+    implementation 'com.stripe:stripe-java:29.2.0'   // payment provider adapter (#25)
     implementation 'com.github.f4b6a3:uuid-creator:6.1.1'   // UUIDv7 (time-ordered) id generation
     implementation 'org.springframework.boot:spring-boot-starter-security'   // authn/authz filter chain
     implementation 'io.jsonwebtoken:jjwt-api:0.13.0'                          // JWT (access token)
@@ -65,6 +66,12 @@ tasks.named('test') {
     // production, and reordering migrations would break Flyway validation there. Tests
     // reset rows between methods via @Sql("/reset.sql").
     systemProperty 'catalogSeed.skip', 'true'
+    // There is no fallback PaymentGateway any more: without a key the context cannot start (by
+    // design — see PaymentGatewayConfig). A dummy key lets @SpringBootTest boot the real wiring,
+    // which also keeps those tests a guard that the production path is constructible. Nothing
+    // calls Stripe: building the client makes no request, and payment tests mock the gateway.
+    systemProperty 'stripe.secret-key', 'sk_test_dummy_not_a_real_key'
+    systemProperty 'stripe.webhook-secret', 'whsec_dummy_not_a_real_secret'
     useJUnitPlatform {
         excludeTags 'benchmark'   // keep the heavy 1M-row benchmark out of the normal test run
     }

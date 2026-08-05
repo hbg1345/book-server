@@ -3,38 +3,38 @@ package com.example.bookserver.payment;
 import java.math.BigDecimal;
 
 /**
- * In-memory {@link PaymentGateway} for tests — no network. Succeeds by default; call
- * {@link #setSucceed(boolean)} to simulate a decline. Records the charge count and the last
- * amount charged so tests can assert the server charged its own order total (not the client's)
- * and that idempotent retries do not double-charge.
+ * In-memory {@link PaymentGateway} for tests — no network. Opens intents successfully by default;
+ * call {@link #setOpenSucceed(boolean)} to simulate a provider that will not. Records how many
+ * intents were opened and the last amount, so tests can assert the server passed its OWN order
+ * total and that a retry replays one intent rather than opening a second.
  */
 public class FakePaymentGateway implements PaymentGateway {
 
-    private boolean succeed = true;
+    private boolean openSucceed = true;
     private boolean refundSucceed = true;
-    private int chargeCount = 0;
+    private int openCount = 0;
     private int refundCount = 0;
-    private BigDecimal lastChargedAmount;
+    private BigDecimal lastIntentAmount;
     private BigDecimal lastRefundedAmount;
 
-    public void setSucceed(boolean succeed) {
-        this.succeed = succeed;
+    public void setOpenSucceed(boolean openSucceed) {
+        this.openSucceed = openSucceed;
     }
 
     public void setRefundSucceed(boolean refundSucceed) {
         this.refundSucceed = refundSucceed;
     }
 
-    public int chargeCount() {
-        return chargeCount;
+    public int openCount() {
+        return openCount;
     }
 
     public int refundCount() {
         return refundCount;
     }
 
-    public BigDecimal lastChargedAmount() {
-        return lastChargedAmount;
+    public BigDecimal lastIntentAmount() {
+        return lastIntentAmount;
     }
 
     public BigDecimal lastRefundedAmount() {
@@ -42,12 +42,18 @@ public class FakePaymentGateway implements PaymentGateway {
     }
 
     @Override
-    public ChargeResult confirm(ChargeRequest request) {
-        chargeCount++;
-        lastChargedAmount = request.amount();
-        return succeed
-                ? ChargeResult.paid("fake_txn_" + request.idempotencyKey())
-                : ChargeResult.failed("card_declined");
+    public String provider() {
+        return "FAKE";
+    }
+
+    @Override
+    public IntentResult openIntent(IntentRequest request) {
+        openCount++;
+        lastIntentAmount = request.amount();
+        // the id is derived from the key, mirroring a real provider replaying an idempotent retry
+        return openSucceed
+                ? IntentResult.opened("pi_" + request.idempotencyKey(), "cs_" + request.idempotencyKey())
+                : IntentResult.failed("provider_unavailable");
     }
 
     @Override
