@@ -89,7 +89,7 @@ class BookControllerIntegrationTest {
 
         mockMvc.perform(get("/api/books"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].bookUuid").value(bookUuid));
+                .andExpect(jsonPath("$.content[0].bookUuid").value(bookUuid));
 
         mockMvc.perform(delete("/api/books/{bookUuid}", bookUuid)
                         .header("Authorization", "Bearer " + token))
@@ -125,13 +125,14 @@ class BookControllerIntegrationTest {
 
         mockMvc.perform(get("/api/books").param("title", "clean"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].bookUuid").value(cleanCode));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].bookUuid").value(cleanCode));
 
         // no filter still lists everything, so search did not replace the plain read
         mockMvc.perform(get("/api/books"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2));
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.totalElements").value(2));
 
         mockMvc.perform(get("/api/books").param("title", "   "))
                 .andExpect(status().isBadRequest());

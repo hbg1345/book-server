@@ -262,4 +262,43 @@ public class BookMapperTest {
 
         assertThat(bookMapper.searchByTitle("Nonexistent", 50)).isEmpty();
     }
+
+    // 6. paging
+    // Verifies: a page is a window onto the same newest-first order findAll uses, and the
+    // window moves by offset. book_uuid is UUIDv7, so DESC is newest-first and the order is
+    // stable across calls — without that a "page 2" would not be a page of anything.
+    @Test
+    void findPage_returnsTheRequestedWindow_newestFirst() {
+        UUID first = insertTitled("First");
+        UUID second = insertTitled("Second");
+        UUID third = insertTitled("Third");
+
+        assertThat(bookMapper.findPage(2, 0))
+                .extracting(Book::getBookUuid)
+                .containsExactly(third, second);
+        assertThat(bookMapper.findPage(2, 2))
+                .extracting(Book::getBookUuid)
+                .containsExactly(first);
+    }
+
+    // Verifies: an offset past the end is an empty page, not an error — asking for page 99 of
+    // a three-book catalogue is a normal thing for a client to do.
+    @Test
+    void findPage_returnsEmpty_pastTheEnd() {
+        insertTitled("Only");
+
+        assertThat(bookMapper.findPage(20, 100)).isEmpty();
+    }
+
+    // Verifies: countAll reports the size of the whole table, not of the current page —
+    // it is what tells the client how many pages exist.
+    @Test
+    void countAll_countsEveryBook() {
+        assertThat(bookMapper.countAll()).isZero();
+
+        insertTitled("One");
+        insertTitled("Two");
+
+        assertThat(bookMapper.countAll()).isEqualTo(2);
+    }
 }

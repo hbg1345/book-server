@@ -19,6 +19,7 @@ import com.example.bookserver.book.dto.BookRequest;
 import com.example.bookserver.common.GlobalExceptionHandler;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -147,20 +148,53 @@ class BookControllerWebMvcTest {
                 .andExpect(status().isNotFound());
     }
 
-    // list: 200 with an array of books
+    // list: 200 with one page of books and the counts a page control needs
     @Test
-    void list_returnsBooks() throws Exception {
+    void list_returnsAPage() throws Exception {
         Book book = new Book(UUID.randomUUID(), "Clean Architecture", "desc",
                 new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, null);
-        when(bookService.list()).thenReturn(List.of(book));
+        when(bookService.list(0, BookService.DEFAULT_SIZE))
+                .thenReturn(new BookPage(List.of(book), 0, 20, 103056));
 
         mockMvc.perform(get("/api/books"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].bookTitle").value("Clean Architecture"))
-                .andExpect(jsonPath("$[0].authors").isArray())
-                .andDo(document("book-list"));
+                .andExpect(jsonPath("$.content[0].bookTitle").value("Clean Architecture"))
+                .andExpect(jsonPath("$.content[0].authors").isArray())
+                .andExpect(jsonPath("$.totalElements").value(103056))
+                .andExpect(jsonPath("$.totalPages").value(5153))
+                .andDo(document("book-list",
+                        queryParameters(
+                                parameterWithName("page").optional()
+                                        .description("Zero-based page index, at most "
+                                                + BookService.MAX_PAGE + " (default 0)"),
+                                parameterWithName("size").optional()
+                                        .description("Books per page, 1 to " + BookService.MAX_SIZE
+                                                + " (default " + BookService.DEFAULT_SIZE + ")"))));
 
         verify(bookService, never()).search(any());
+    }
+
+    // page and size reach the service as given, rather than being defaulted away
+    @Test
+    void list_passesPageAndSizeThrough() throws Exception {
+        when(bookService.list(3, 5)).thenReturn(new BookPage(List.of(), 3, 5, 0));
+
+        mockMvc.perform(get("/api/books").param("page", "3").param("size", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(3))
+                .andExpect(jsonPath("$.size").value(5));
+
+        verify(bookService).list(3, 5);
+    }
+
+    // a page the catalogue will not serve -> 400, through the same Problem Details handler
+    @Test
+    void list_returns400_whenThePageIsRefused() throws Exception {
+        when(bookService.list(1000, BookService.DEFAULT_SIZE))
+                .thenThrow(new InvalidPageException("too deep"));
+
+        mockMvc.perform(get("/api/books").param("page", "1000"))
+                .andExpect(status().isBadRequest());
     }
 
     // search: ?title= switches the collection read from "list everything" to "find these"
@@ -172,14 +206,14 @@ class BookControllerWebMvcTest {
 
         mockMvc.perform(get("/api/books").param("title", "clean"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].bookTitle").value("Clean Architecture"))
+                .andExpect(jsonPath("$.content[0].bookTitle").value("Clean Architecture"))
                 .andDo(document("book-search",
                         queryParameters(
                                 parameterWithName("title").description(
                                         "Substring of the book title to search for, case-insensitive. "
                                                 + "Omit to list the whole catalogue."))));
 
-        verify(bookService, never()).list();
+        verify(bookService, never()).list(anyInt(), anyInt());
     }
 
     // a blank title is a search with nothing to search for -> 400, not the whole catalogue
@@ -190,7 +224,7 @@ class BookControllerWebMvcTest {
         mockMvc.perform(get("/api/books").param("title", "  "))
                 .andExpect(status().isBadRequest());
 
-        verify(bookService, never()).list();
+        verify(bookService, never()).list(anyInt(), anyInt());
     }
 
     // reads stay public: search needs no token
@@ -268,7 +302,8 @@ class BookControllerWebMvcTest {
     // reads stay public: listing books needs no authentication
     @Test
     void list_isPublic_whenAnonymous() throws Exception {
-        when(bookService.list()).thenReturn(List.of());
+        when(bookService.list(0, BookService.DEFAULT_SIZE))
+                .thenReturn(new BookPage(List.of(), 0, 20, 0));
 
         mockMvc.perform(get("/api/books"))
                 .andExpect(status().isOk());
