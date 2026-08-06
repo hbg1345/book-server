@@ -20,6 +20,11 @@
 			<index name="pk_book" unique="PRIMARY_KEY" >
 				<column name="book_uuid" />
 			</index>
+			<index name="unq_book_identity" unique="UNIQUE_KEY" >
+				<column name="book_title" />
+				<column name="publisher" />
+				<column name="publish_date" />
+			</index>
 			<index name="idx_book_category" unique="NORMAL" >
 				<column name="category_uuid" />
 			</index>

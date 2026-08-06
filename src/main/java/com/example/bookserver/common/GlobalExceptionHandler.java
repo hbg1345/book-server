@@ -18,6 +18,7 @@ import com.example.bookserver.address.AddressNotFoundException;
 import com.example.bookserver.address.InvalidPostalCodeException;
 import com.example.bookserver.auth.InvalidRefreshTokenException;
 import com.example.bookserver.book.BookNotFoundException;
+import com.example.bookserver.book.DuplicateBookException;
 import com.example.bookserver.cart.CartItemNotFoundException;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
 import com.example.bookserver.payment.PaymentIntentFailedException;
@@ -49,6 +50,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(UserNotFoundException.class)
     public ProblemDetail handleUserNotFound(UserNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Registering or renaming a book onto an identity the catalogue already holds. */
+    @ExceptionHandler(DuplicateBookException.class)
+    public ProblemDetail handleDuplicateBook(DuplicateBookException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     /** Operating on a book_uuid that does not exist. */

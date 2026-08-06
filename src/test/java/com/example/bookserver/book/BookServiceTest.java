@@ -131,4 +131,38 @@ public class BookServiceTest {
         assertThatThrownBy(() -> bookService.delete(Uuids.newId()))
                 .isInstanceOf(BookNotFoundException.class);
     }
+
+    // A book is identified by (title, publisher, publish date). Registering the same one twice is
+    // reported rather than quietly listed twice — a second row brings its own inventory, so the
+    // catalogue would offer stock the shop does not have.
+    @Test
+    void create_throws_whenTheBookIsAlreadyInTheCatalogue() {
+        bookService.create(sampleRequest(null));
+
+        assertThatThrownBy(() -> bookService.create(sampleRequest(null)))
+                .isInstanceOf(DuplicateBookException.class);
+    }
+
+    // A different publish date is a different book, even under the same title and publisher.
+    @Test
+    void create_allowsTheSameTitleWithADifferentIdentity() {
+        bookService.create(sampleRequest(null));
+
+        UUID other = bookService.create(new BookRequest("Clean Architecture", "reissue",
+                new BigDecimal("39.99"), LocalDate.of(2023, 5, 1), "Wikibooks", 10, null));
+
+        assertThat(bookMapper.findById(other)).isNotNull();
+    }
+
+    // Editing a book onto an identity another book already holds is refused the same way.
+    @Test
+    void update_throws_whenItCollidesWithAnotherBook() {
+        UUID first = bookService.create(sampleRequest(null));
+        UUID second = bookService.create(new BookRequest("Refactoring", "desc",
+                new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, null));
+
+        assertThatThrownBy(() -> bookService.update(second, sampleRequest(null)))
+                .isInstanceOf(DuplicateBookException.class);
+        assertThat(bookMapper.findById(first).getBookTitle()).isEqualTo("Clean Architecture");
+    }
 }

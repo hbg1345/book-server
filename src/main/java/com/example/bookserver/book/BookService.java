@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,7 +30,7 @@ public class BookService {
         UUID bookUuid = Uuids.newId();
         Book book = new Book(bookUuid, req.bookTitle(), req.bookDescription(),
                 req.price(), req.publishDate(), req.publisher(), req.inventory(), null);
-        bookMapper.insert(book);
+        insertRejectingDuplicate(book);
         linkAuthors(bookUuid, req.authorUuids());
         return bookUuid;
     }
@@ -54,7 +55,7 @@ public class BookService {
         requireBook(bookUuid);
         Book book = new Book(bookUuid, req.bookTitle(), req.bookDescription(),
                 req.price(), req.publishDate(), req.publisher(), req.inventory(), null);
-        bookMapper.update(book);
+        updateRejectingDuplicate(book);
         bookMapper.unlinkAuthors(bookUuid);
         linkAuthors(bookUuid, req.authorUuids());
     }
@@ -63,6 +64,29 @@ public class BookService {
     public void delete(UUID bookUuid) {
         requireBook(bookUuid);
         bookMapper.delete(bookUuid);
+    }
+
+    /**
+     * The catalogue keys a book on (title, publisher, publish date) — see V10. The insert is what
+     * enforces it: checking first and then inserting would leave a window for a second submission
+     * to pass the same check, which is exactly the double-click this guards against. So the
+     * violation is translated rather than prevented.
+     */
+    private void insertRejectingDuplicate(Book book) {
+        try {
+            bookMapper.insert(book);
+        } catch (DuplicateKeyException e) {
+            throw new DuplicateBookException(book.getBookTitle());
+        }
+    }
+
+    /** An edit can collide with an existing book just as a registration can. */
+    private void updateRejectingDuplicate(Book book) {
+        try {
+            bookMapper.update(book);
+        } catch (DuplicateKeyException e) {
+            throw new DuplicateBookException(book.getBookTitle());
+        }
     }
 
     private void linkAuthors(UUID bookUuid, List<UUID> authorUuids) {
