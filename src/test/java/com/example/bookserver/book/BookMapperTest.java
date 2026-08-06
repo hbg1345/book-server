@@ -203,4 +203,63 @@ public class BookMapperTest {
 
         assertThat(bookMapper.findById(bookId)).isNull();
     }
+
+    // --- helper: a book that exists only to carry a title ---
+    private UUID insertTitled(String title) {
+        UUID bookId = Uuids.newId();
+        Book book = sampleBook(bookId);
+        book.setBookTitle(title);
+        bookMapper.insert(book);
+        return bookId;
+    }
+
+    // 6. title search
+    // Verifies: the match is on a substring anywhere in the title, not just the start,
+    // and ignores case — someone typing "clean" expects both the book that starts with
+    // it and the one that merely contains it.
+    @Test
+    void searchByTitle_matchesSubstring_ignoringCase() {
+        insertTitled("Clean Code");
+        insertTitled("The Unclean Truth");
+        insertTitled("Refactoring");
+
+        assertThat(bookMapper.searchByTitle("clean", 50))
+                .extracting(Book::getBookTitle)
+                .containsExactlyInAnyOrder("Clean Code", "The Unclean Truth");
+    }
+
+    // Verifies: LIKE wildcards typed by the user are matched literally. Without escaping,
+    // a search for "%" would return the whole catalogue and "100_" would match "1000",
+    // so the query would answer a question nobody asked.
+    @Test
+    void searchByTitle_treatsWildcardsAsLiteralText() {
+        insertTitled("Clean Code");
+        insertTitled("100% Pure Java");
+        insertTitled("1000 Ideas");
+
+        assertThat(bookMapper.searchByTitle("%", 50))
+                .extracting(Book::getBookTitle)
+                .containsExactly("100% Pure Java");
+        assertThat(bookMapper.searchByTitle("100_", 50)).isEmpty();
+    }
+
+    // Verifies: the limit is applied by the query rather than by the caller trimming the
+    // result. The catalogue holds ~103k rows, so an unbounded LIKE scan would serialise
+    // far more than any client asked for.
+    @Test
+    void searchByTitle_appliesLimit() {
+        insertTitled("Clean Code");
+        insertTitled("Clean Architecture");
+        insertTitled("Clean Agile");
+
+        assertThat(bookMapper.searchByTitle("Clean", 2)).hasSize(2);
+    }
+
+    // Verifies: no match is an empty list, not null — callers should not have to null-check.
+    @Test
+    void searchByTitle_returnsEmpty_whenNothingMatches() {
+        insertTitled("Clean Code");
+
+        assertThat(bookMapper.searchByTitle("Nonexistent", 50)).isEmpty();
+    }
 }

@@ -39,6 +39,29 @@ public interface BookMapper {
     @Select("SELECT * FROM book ORDER BY book_uuid DESC")
     List<Book> findAll();
 
+    // Title search: substring match, case-insensitive, newest first (book_uuid is UUIDv7).
+    //
+    // The nested replace() escapes the LIKE wildcards out of the user's text before it is
+    // wrapped in '%...%'. This is not injection defence — #{title} is a bound parameter, so
+    // the value never reaches the parser as SQL. It is about what LIKE does with the value
+    // afterwards: '%' and '_' are wildcards *within the operator*, so a search for "100%"
+    // would silently become "anything containing 100", and "100_" would match "1000". The
+    // escaping keeps the result equal to what was typed, and lives here rather than in the
+    // caller so that every caller gets it, not only the one that remembers.
+    //
+    // The limit is part of the query for the same reason: the catalogue holds ~103k rows and
+    // this predicate cannot use an index, so trimming in Java would still have paid for the
+    // full scan and the full transfer.
+    @Select("""
+            SELECT * FROM book
+            WHERE book_title ILIKE '%' ||
+                  replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+                  || '%' ESCAPE '\\'
+            ORDER BY book_uuid DESC
+            LIMIT #{limit}
+            """)
+    List<Book> searchByTitle(@Param("title") String title, @Param("limit") int limit);
+
     // book plus its authors, assembled via the nested @Many query
     @Select("SELECT * FROM book WHERE book_uuid = #{bookUuid}")
     @Results(id = "bookResult", value = {

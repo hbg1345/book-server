@@ -98,4 +98,42 @@ class BookControllerIntegrationTest {
         mockMvc.perform(get("/api/books/{bookUuid}", bookUuid))
                 .andExpect(status().isNotFound());
     }
+
+    /** Create a book through the API and return its uuid. */
+    private String createBook(String token, String title) throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/books")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"bookTitle":"%s","bookDescription":"desc",
+                                 "price":39.99,"publishDate":"2021-01-01","publisher":"Wikibooks",
+                                 "inventory":10,"authorUuids":[]}
+                                """.formatted(title)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return JsonPath.read(created.getResponse().getContentAsString(), "$.bookUuid");
+    }
+
+    // ?title= filters against the real database, and the blank-query rejection survives the
+    // trip through the Problem Details handler. The web slice mocks the service, so this is
+    // the only place the query actually reaches PostgreSQL.
+    @Test
+    void search_filtersAgainstTheDatabase() throws Exception {
+        String token = adminToken();
+        String cleanCode = createBook(token, "Clean Code");
+        createBook(token, "Refactoring");
+
+        mockMvc.perform(get("/api/books").param("title", "clean"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].bookUuid").value(cleanCode));
+
+        // no filter still lists everything, so search did not replace the plain read
+        mockMvc.perform(get("/api/books"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
+
+        mockMvc.perform(get("/api/books").param("title", "   "))
+                .andExpect(status().isBadRequest());
+    }
 }
