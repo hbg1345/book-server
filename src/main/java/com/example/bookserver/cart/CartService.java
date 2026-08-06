@@ -29,12 +29,10 @@ public class CartService {
     @Transactional
     public void addItem(UUID userUuid, UUID bookUuid, int quantity) {
         requireBook(bookUuid);
-        CartItem existing = cartItemMapper.findByUserAndBook(userUuid, bookUuid);
-        if (existing == null) {
-            cartItemMapper.insert(new CartItem(userUuid, bookUuid, quantity, null));
-        } else {
-            cartItemMapper.updateQuantity(userUuid, bookUuid, existing.getQuantity() + quantity);
-        }
+        // The insert-or-increment is one statement (see CartItemMapper.addQuantity): deciding in
+        // Java which of the two to run leaves a window where a second click does the same, and
+        // the cart either rejects it with a primary key violation or silently loses one addition.
+        cartItemMapper.addQuantity(userUuid, bookUuid, quantity);
     }
 
     /** Every item in the user's cart, each joined with its book title and price. */

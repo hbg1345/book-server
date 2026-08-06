@@ -22,6 +22,26 @@ public interface CartItemMapper {
             """)
     void insert(CartItem cartItem);
 
+    // Add to the line, creating it if this is the first copy.
+    //
+    // One statement rather than "read the line, then insert or update it": between that read and
+    // that write a second click can insert the same (user, book), and the loser then hits the
+    // primary key with nothing mapping the violation to a status — a 500 for pressing a button
+    // twice. When the line did exist, both clicks read the same quantity and write read+1, so one
+    // addition disappears with no error at all.
+    //
+    // ON CONFLICT lets the database settle it: the second caller's insert becomes an increment of
+    // whatever is committed at that moment, so both additions land whichever order they arrive in.
+    @Insert("""
+            INSERT INTO cart_item (user_uuid, book_uuid, quantity)
+            VALUES (#{userUuid}, #{bookUuid}, #{quantity})
+            ON CONFLICT (user_uuid, book_uuid)
+            DO UPDATE SET quantity = cart_item.quantity + EXCLUDED.quantity
+            """)
+    void addQuantity(@Param("userUuid") UUID userUuid,
+                     @Param("bookUuid") UUID bookUuid,
+                     @Param("quantity") int quantity);
+
     @Select("""
             SELECT * FROM cart_item
             WHERE user_uuid = #{userUuid} AND book_uuid = #{bookUuid}
