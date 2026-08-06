@@ -815,4 +815,167 @@ public class PurchaseServiceTest {
         assertThatThrownBy(() -> purchaseService.returnOrder(intruder, p))
                 .isInstanceOf(OrderNotFoundException.class);
     }
+
+    // --- partial cancellation ---
+
+    // One copy of a two-copy line goes back: that stock is returned, the order keeps the rest,
+    // and the total falls by exactly one copy's price.
+    @Test
+    void cancelItem_returnsOneCopy_andKeepsTheRest() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Code", "10.00", 10);
+        cartService.addItem(user, book, 2);
+        UUID purchase = purchaseService.placeOrder(user, inlineOrder());
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(8);
+
+        purchaseService.cancelItem(user, purchase, book, 1);
+
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(9);
+        PurchaseCurrent current = currentMapper.findByPurchaseUuid(purchase);
+        assertThat(current.getPurchaseState()).isEqualTo(PurchaseState.PARTIALLY_CANCELLED);
+        assertThat(current.getPrice()).isEqualByComparingTo("10.00");
+        assertThat(bookHistoryMapper.findByHistoryUuid(current.getHistoryUuid()))
+                .singleElement()
+                .satisfies(line -> assertThat(line.getQuantity()).isEqualTo(1));
+    }
+
+    // Cancelling one book of two leaves the other line untouched.
+    @Test
+    void cancelItem_leavesTheOtherLinesAlone() {
+        UUID user = persistUser();
+        UUID kept = persistBook("Refactoring", "15.00", 10);
+        UUID dropped = persistBook("Clean Code", "10.00", 10);
+        cartService.addItem(user, kept, 1);
+        cartService.addItem(user, dropped, 1);
+        UUID purchase = purchaseService.placeOrder(user, inlineOrder());
+
+        purchaseService.cancelItem(user, purchase, dropped, 1);
+
+        PurchaseCurrent current = currentMapper.findByPurchaseUuid(purchase);
+        assertThat(current.getPrice()).isEqualByComparingTo("15.00");
+        assertThat(bookHistoryMapper.findByHistoryUuid(current.getHistoryUuid()))
+                .extracting(PurchaseBookHistory::getBookUuid)
+                .containsExactly(kept);
+        assertThat(bookMapper.findById(kept).getInventory()).isEqualTo(9);     // still reserved
+        assertThat(bookMapper.findById(dropped).getInventory()).isEqualTo(10); // given back
+    }
+
+    // Cancelling the last copy is the whole order, so it lands in the terminal state a full
+    // cancel would have reached rather than leaving an empty half-cancelled order.
+    @Test
+    void cancelItem_endsTheOrder_whenNothingIsLeft() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Code", "10.00", 10);
+        cartService.addItem(user, book, 2);
+        UUID purchase = purchaseService.placeOrder(user, inlineOrder());
+
+        purchaseService.cancelItem(user, purchase, book, 2);
+
+        assertThat(currentMapper.findByPurchaseUuid(purchase).getPurchaseState())
+                .isEqualTo(PurchaseState.CANCELLED);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(10);
+    }
+
+    // A paid order refunds that share of the money, and the payment records how much went back
+    // while staying PAID — the rest of the charge is still held.
+    @Test
+    void cancelItem_refundsThatShare_ofAPaidOrder() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Code", "10.00", 10);
+        cartService.addItem(user, book, 2);
+        UUID purchase = purchaseService.placeOrder(user, inlineOrder());
+        payFor(user, purchase, "20.00");
+
+        purchaseService.cancelItem(user, purchase, book, 1);
+
+        assertThat(gateway.lastRefundedAmount()).isEqualByComparingTo("10.00");
+        Payment payment = paymentMapper.findByPurchaseUuid(purchase);
+        assertThat(payment.getRefundedAmount()).isEqualByComparingTo("10.00");
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PAID);   // half is still held
+        assertThat(currentMapper.findByPurchaseUuid(purchase).getPurchaseState())
+                .isEqualTo(PurchaseState.PARTIALLY_REFUNDED);
+    }
+
+    // Two partial refunds must reach the provider as two refunds. A key that named only the order
+    // would make the second look like a retry of the first: the provider answers success and
+    // moves no money.
+    @Test
+    void cancelItem_refundsAgain_afterAnEarlierPartialRefund() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Code", "10.00", 10);
+        cartService.addItem(user, book, 3);
+        UUID purchase = purchaseService.placeOrder(user, inlineOrder());
+        payFor(user, purchase, "30.00");
+
+        purchaseService.cancelItem(user, purchase, book, 1);
+        purchaseService.cancelItem(user, purchase, book, 1);
+
+        assertThat(gateway.refundCount()).isEqualTo(2);
+        Payment payment = paymentMapper.findByPurchaseUuid(purchase);
+        assertThat(payment.getRefundedAmount()).isEqualByComparingTo("20.00");
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PAID);
+    }
+
+    // Cancelling the remainder of a partly-refunded order returns the rest and closes it out.
+    @Test
+    void cancel_refundsTheRemainder_ofAPartlyRefundedOrder() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Code", "10.00", 10);
+        cartService.addItem(user, book, 2);
+        UUID purchase = purchaseService.placeOrder(user, inlineOrder());
+        payFor(user, purchase, "20.00");
+        purchaseService.cancelItem(user, purchase, book, 1);
+
+        purchaseService.cancel(user, purchase);
+
+        Payment payment = paymentMapper.findByPurchaseUuid(purchase);
+        assertThat(payment.getRefundedAmount()).isEqualByComparingTo("20.00");
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(currentMapper.findByPurchaseUuid(purchase).getPurchaseState())
+                .isEqualTo(PurchaseState.REFUNDED);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(10);
+    }
+
+    // More copies than the order holds, or none at all, is a bad request rather than a silent
+    // partial success.
+    @Test
+    void cancelItem_rejectsAQuantityTheLineCannotGiveUp() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Code", "10.00", 10);
+        cartService.addItem(user, book, 2);
+        UUID purchase = purchaseService.placeOrder(user, inlineOrder());
+
+        assertThatThrownBy(() -> purchaseService.cancelItem(user, purchase, book, 3))
+                .isInstanceOf(InvalidCancellationException.class);
+        assertThatThrownBy(() -> purchaseService.cancelItem(user, purchase, book, 0))
+                .isInstanceOf(InvalidCancellationException.class);
+        assertThat(bookMapper.findById(book).getInventory()).isEqualTo(8);   // untouched
+    }
+
+    // A book the order never held.
+    @Test
+    void cancelItem_throws_whenTheOrderHasNoSuchLine() {
+        UUID user = persistUser();
+        UUID ordered = persistBook("Clean Code", "10.00", 10);
+        UUID other = persistBook("Refactoring", "15.00", 10);
+        cartService.addItem(user, ordered, 1);
+        UUID purchase = purchaseService.placeOrder(user, inlineOrder());
+
+        assertThatThrownBy(() -> purchaseService.cancelItem(user, purchase, other, 1))
+                .isInstanceOf(OrderItemNotFoundException.class);
+    }
+
+    // Once the order is being prepared it is too late to drop a line.
+    @Test
+    void cancelItem_throws_onceTheOrderIsUnderway() {
+        UUID user = persistUser();
+        UUID book = persistBook("Clean Code", "10.00", 10);
+        cartService.addItem(user, book, 2);
+        UUID purchase = purchaseService.placeOrder(user, inlineOrder());
+        payFor(user, purchase, "20.00");
+        purchaseService.prepare(purchase);
+
+        assertThatThrownBy(() -> purchaseService.cancelItem(user, purchase, book, 1))
+                .isInstanceOf(IllegalOrderStateException.class);
+    }
 }

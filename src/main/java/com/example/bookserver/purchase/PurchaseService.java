@@ -48,7 +48,12 @@ public class PurchaseService {
 
     /** An order may only be cancelled before it starts being prepared. */
     private static final Set<PurchaseState> CANCELLABLE =
-            EnumSet.of(PurchaseState.PAYMENT_PENDING, PurchaseState.ORDERED);
+            EnumSet.of(PurchaseState.PAYMENT_PENDING, PurchaseState.ORDERED,
+                    PurchaseState.PARTIALLY_CANCELLED, PurchaseState.PARTIALLY_REFUNDED);
+
+    /** States in which money has already been taken, so giving a line back means refunding it. */
+    private static final Set<PurchaseState> PAID_STATES =
+            EnumSet.of(PurchaseState.ORDERED, PurchaseState.PARTIALLY_REFUNDED);
 
     /** An order may be returned (for a refund) once it has been delivered. */
     private static final Set<PurchaseState> RETURNABLE =
@@ -364,6 +369,91 @@ public class PurchaseService {
         }
     }
 
+    /**
+     * Cancel some copies of one book without touching the rest of the order.
+     *
+     * <p>Each state change records what the order still holds, so a partial cancellation appends
+     * an event with the line's quantity reduced. The copies that went away are the difference
+     * between two events, which is also what keeps a later full cancel honest: {@link
+     * #restoreStock} gives back the current event's quantities, so a copy released here is not
+     * released a second time.
+     *
+     * <p>Stock goes back and, if the order was paid, that share of the money with it. The refund
+     * is issued before anything is written, as everywhere else — a provider failure then leaves
+     * the order exactly as it was and the customer may try again.
+     *
+     * @throws OrderItemNotFoundException  if the order holds no line for that book
+     * @throws InvalidCancellationException if the quantity is not one the line can give up
+     * @throws IllegalOrderStateException  once the order is too far along to cancel
+     */
+    @Transactional
+    public void cancelItem(UUID userUuid, UUID purchaseUuid, UUID bookUuid, int quantity) {
+        PurchaseCurrent current = requireOwnOrderForUpdate(userUuid, purchaseUuid);
+        if (!CANCELLABLE.contains(current.getPurchaseState())) {
+            throw new IllegalOrderStateException(
+                    "Order can no longer be cancelled: " + current.getPurchaseState());
+        }
+        List<PurchaseBookHistory> lines = bookHistoryMapper.findByHistoryUuid(current.getHistoryUuid());
+        PurchaseBookHistory line = lines.stream()
+                .filter(b -> b.getBookUuid().equals(bookUuid))
+                .findFirst()
+                .orElseThrow(() -> new OrderItemNotFoundException(purchaseUuid, bookUuid));
+        if (quantity < 1 || quantity > line.getQuantity()) {
+            throw new InvalidCancellationException("cannot cancel " + quantity
+                    + " of the " + line.getQuantity() + " copies the order holds");
+        }
+
+        boolean paid = PAID_STATES.contains(current.getPurchaseState());
+        if (paid) {
+            refundShare(purchaseUuid, line.getPrice().multiply(BigDecimal.valueOf(quantity)));
+        }
+        bookMapper.incrementInventory(bookUuid, quantity);
+
+        List<BookLine> remaining = lines.stream()
+                .map(b -> b.getBookUuid().equals(bookUuid)
+                        ? new BookLine(bookUuid, b.getQuantity() - quantity, b.getPrice())
+                        : new BookLine(b.getBookUuid(), b.getQuantity(), b.getPrice()))
+                .filter(b -> b.quantity() > 0)
+                .toList();
+
+        if (remaining.isEmpty()) {
+            // The last copy went: this is the whole order, so it ends where a full cancel ends —
+            // and the event keeps the original lines, so the timeline still shows what was bought.
+            transition(current, paid ? PurchaseState.REFUNDED : PurchaseState.CANCELLED);
+            return;
+        }
+        BigDecimal remainingTotal = remaining.stream()
+                .map(b -> b.price().multiply(BigDecimal.valueOf(b.quantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        recordEvent(purchaseUuid, userUuid,
+                paid ? PurchaseState.PARTIALLY_REFUNDED : PurchaseState.PARTIALLY_CANCELLED,
+                remainingTotal, remaining, LocalDateTime.now());
+    }
+
+    /**
+     * Return part of a charge. The key names the step rather than the order — it carries the
+     * total refunded so far, so the provider treats a retry of <em>this</em> refund as a repeat
+     * and the next one as new. A single per-order key would make every refund after the first a
+     * replay of the first: the provider would answer success and move no money.
+     *
+     * <p>{@code recordRefund} refuses to take the running total past what was charged, so a
+     * refund that would overpay is rejected by the database rather than by a check that another
+     * transaction could have invalidated.
+     */
+    private void refundShare(UUID purchaseUuid, BigDecimal amount) {
+        Payment payment = paymentMapper.findByPurchaseUuid(purchaseUuid);
+        String key = payment.getIdempotencyKey() + "-refund-" + payment.getRefundedAmount().toPlainString();
+
+        RefundResult result = paymentGateway.refund(
+                new RefundRequest(payment.getProviderTxnId(), amount, key));
+        if (!result.success()) {
+            throw new RefundFailedException(purchaseUuid);   // nothing written yet
+        }
+        if (paymentMapper.recordRefund(payment.getPaymentUuid(), amount) == 0) {
+            throw new RefundFailedException(purchaseUuid);   // would refund more than was charged
+        }
+    }
+
     /** Buyer returns a delivered order for a refund: {@code DELIVERED/CONFIRMED -> REFUNDED}. Owner-scoped. */
     @Transactional
     public void returnOrder(UUID userUuid, UUID purchaseUuid) {
@@ -414,16 +504,12 @@ public class PurchaseService {
      * REFUNDED, and stock is restored.
      */
     private void refundAndRestore(PurchaseCurrent current) {
-        Payment payment = paymentMapper.findByPurchaseUuid(current.getPurchaseUuid());
-
-        RefundResult result = paymentGateway.refund(new RefundRequest(
-                payment.getProviderTxnId(), current.getPrice(), payment.getIdempotencyKey() + "-refund"));
-        if (!result.success()) {
-            throw new RefundFailedException(current.getPurchaseUuid());   // nothing written yet
-        }
+        // current.getPrice() is what the order still holds, so after a partial cancellation this
+        // returns the remainder rather than the original charge. refundShare keys the call on the
+        // running total, which is what stops it being read as a repeat of an earlier refund.
+        refundShare(current.getPurchaseUuid(), current.getPrice());
 
         transition(current, PurchaseState.REFUND_REQUESTED);
-        paymentMapper.updateStatus(payment.getPaymentUuid(), PaymentStatus.REFUNDED);
         PurchaseCurrent afterRequest = currentMapper.findByPurchaseUuid(current.getPurchaseUuid());
         restoreStock(afterRequest);
         transition(afterRequest, PurchaseState.REFUNDED);
