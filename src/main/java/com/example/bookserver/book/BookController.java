@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.bookserver.book.dto.BookPageResponse;
 import com.example.bookserver.book.dto.BookRequest;
 import com.example.bookserver.book.dto.BookResponse;
 import com.example.bookserver.book.dto.CreateBookResponse;
@@ -42,14 +43,24 @@ public class BookController {
     }
 
     /**
-     * The catalogue, optionally filtered. {@code ?title=} narrows the same collection
-     * resource rather than introducing a /search sub-resource: the thing being addressed
-     * is still the set of books, and a filtered set is not a different kind of thing.
+     * The catalogue, one page at a time, optionally filtered. {@code ?title=} narrows the same
+     * collection resource rather than introducing a /search sub-resource: the thing being
+     * addressed is still the set of books, and a filtered set is not a different kind of thing.
+     *
+     * <p>The response shape does not change with the parameters — a client that asked for a
+     * page and a client that asked for a search parse the same thing. A search is served as a
+     * single page: it is capped rather than paged (see {@link BookService#SEARCH_LIMIT}), so
+     * its total is the hits returned and there is never a second page to fetch.
      */
     @GetMapping
-    public List<BookResponse> list(@RequestParam(required = false) String title) {
-        List<Book> books = title == null ? bookService.list() : bookService.search(title);
-        return books.stream().map(BookResponse::from).toList();
+    public BookPageResponse list(@RequestParam(required = false) String title,
+                                 @RequestParam(defaultValue = "0") int page,
+                                 @RequestParam(defaultValue = "" + BookService.DEFAULT_SIZE) int size) {
+        if (title != null) {
+            List<Book> hits = bookService.search(title);
+            return BookPageResponse.from(new BookPage(hits, 0, Math.max(hits.size(), 1), hits.size()));
+        }
+        return BookPageResponse.from(bookService.list(page, size));
     }
 
     @GetMapping("/{bookUuid}")
