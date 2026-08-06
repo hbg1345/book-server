@@ -37,6 +37,24 @@ public interface PurchaseCurrentMapper {
             """)
     PurchaseCurrent findByPurchaseUuid(UUID purchaseUuid);
 
+    // Same lookup, but for a caller that is about to act on what it reads.
+    //
+    // Every state change is guarded by a check on the current state, and that check is made in
+    // Java. Under READ COMMITTED a plain SELECT lets two transactions read the same state, both
+    // conclude the transition is legal, and both perform it — two cancels of one order each hand
+    // the reserved stock back, inventing inventory that was never returned.
+    //
+    // FOR UPDATE closes that window: the second reader blocks until the first commits, and
+    // PostgreSQL then re-reads the row, so it sees the state the winner left behind and its own
+    // guard rejects the duplicate. Reads that do not write (order detail, order list) deliberately
+    // keep using the unlocked query — a lock there would queue behind writers for nothing.
+    @Select("""
+            SELECT * FROM purchase_current
+            WHERE purchase_uuid = #{purchaseUuid}
+            FOR UPDATE
+            """)
+    PurchaseCurrent findByPurchaseUuidForUpdate(UUID purchaseUuid);
+
     // the hot path: current state of ALL of a user's purchases, newest first.
     // Served by idx_purchase_current_user — no sort/distinct over the history log.
     @Select("""
