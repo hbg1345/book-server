@@ -13,11 +13,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.jdbc.Sql;
 
 import com.example.bookserver.TestcontainersConfiguration;
@@ -25,12 +27,22 @@ import com.example.bookserver.book.Book;
 import com.example.bookserver.book.BookMapper;
 import com.example.bookserver.cart.CartService;
 import com.example.bookserver.common.Uuids;
+import com.example.bookserver.payment.IntentRequest;
+import com.example.bookserver.payment.IntentResult;
+import com.example.bookserver.payment.OpenedPayment;
+import com.example.bookserver.payment.PaymentGateway;
+import com.example.bookserver.payment.RefundRequest;
+import com.example.bookserver.payment.RefundResult;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest.InlineAddress;
 import com.example.bookserver.user.User;
 import com.example.bookserver.user.UserMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * What the single-threaded tests cannot see: whether the order paths still hold when several
@@ -49,6 +61,27 @@ import static org.assertj.core.api.Assertions.assertThat;
 // queue on the pool instead of contending on the row, and the race under test would not run.
 @TestPropertySource(properties = "spring.datasource.hikari.maximum-pool-size=25")
 class PurchaseConcurrencyTest {
+
+    /**
+     * The provider stands in for a real one in the way that matters here: its refund takes long
+     * enough to hold the transaction open. A gateway that returns instantly would close the race
+     * window by accident and let a broken lock pass.
+     */
+    @MockitoBean
+    private PaymentGateway paymentGateway;
+
+    @BeforeEach
+    void stubGateway() {
+        when(paymentGateway.provider()).thenReturn("fake");
+        when(paymentGateway.openIntent(any(IntentRequest.class))).thenAnswer(invocation -> {
+            IntentRequest request = invocation.getArgument(0);
+            return IntentResult.opened("txn-" + request.purchaseUuid(), "secret");
+        });
+        when(paymentGateway.refund(any(RefundRequest.class))).thenAnswer(invocation -> {
+            Thread.sleep(300);   // a real provider round-trip, and the width of the race window
+            return RefundResult.refunded("refund-txn");
+        });
+    }
 
     @Autowired
     private PurchaseService purchaseService;
@@ -187,6 +220,37 @@ class PurchaseConcurrencyTest {
                     .as("attempt %d: the reservation is released once, however many cancels arrive", attempt)
                     .isEqualTo(stock);
         }
+    }
+
+    /**
+     * Two cancels of a <em>paid</em> order. The refund is a server-to-server call made inside the
+     * transaction, so the window between reading the state and writing the result is as wide as
+     * the provider is slow — hundreds of milliseconds, not the microseconds of the unpaid path.
+     * A user double-clicking cancel is enough to land inside it.
+     *
+     * <p>What is at stake here is money, not only stock: two refunds mean the customer is paid
+     * back twice for one order, and the second refund is not something the shop can undo.
+     */
+    @Test
+    void concurrentCancelsOfAPaidOrder_refundOnlyOnce() throws Exception {
+        int stock = 10;
+        int ordered = 2;
+        UUID bookUuid = persistBook(stock);
+        UUID userUuid = persistUser();
+        cartService.addItem(userUuid, bookUuid, ordered);
+        UUID purchaseUuid = purchaseService.placeOrder(userUuid, inlineOrder());
+
+        // drive it to ORDERED the way the provider's webhook does
+        OpenedPayment opened = purchaseService.openPaymentIntent(userUuid, purchaseUuid);
+        purchaseService.markPaymentSucceeded(opened.payment().getProviderTxnId(), new BigDecimal("20.00"));
+        assertThat(bookMapper.findById(bookUuid).getInventory()).isEqualTo(stock - ordered);
+
+        runAtOnce(List.<Callable<Void>>of(
+                () -> cancelQuietly(userUuid, purchaseUuid),
+                () -> cancelQuietly(userUuid, purchaseUuid)));
+
+        verify(paymentGateway, times(1)).refund(any(RefundRequest.class));
+        assertThat(bookMapper.findById(bookUuid).getInventory()).isEqualTo(stock);
     }
 
     /** Losing a cancel race is legitimate: the order is already cancelled by the winner. */
