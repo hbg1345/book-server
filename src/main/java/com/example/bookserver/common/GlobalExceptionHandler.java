@@ -17,6 +17,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import com.example.bookserver.address.AddressNotFoundException;
 import com.example.bookserver.address.InvalidPostalCodeException;
 import com.example.bookserver.auth.InvalidRefreshTokenException;
+import com.example.bookserver.book.BlankSearchQueryException;
 import com.example.bookserver.book.BookNotFoundException;
 import com.example.bookserver.cart.CartItemNotFoundException;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
@@ -55,6 +56,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(BookNotFoundException.class)
     public ProblemDetail handleBookNotFound(BookNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** A catalogue search with an empty query, which would match the whole catalogue. */
+    @ExceptionHandler(BlankSearchQueryException.class)
+    public ProblemDetail handleBlankSearchQuery(BlankSearchQueryException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     /** Changing the quantity of a book that is not in the user's cart. */

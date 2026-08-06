@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -40,9 +41,15 @@ public class BookController {
         return new CreateBookResponse(bookService.create(req));
     }
 
+    /**
+     * The catalogue, optionally filtered. {@code ?title=} narrows the same collection
+     * resource rather than introducing a /search sub-resource: the thing being addressed
+     * is still the set of books, and a filtered set is not a different kind of thing.
+     */
     @GetMapping
-    public List<BookResponse> list() {
-        return bookService.list().stream().map(BookResponse::from).toList();
+    public List<BookResponse> list(@RequestParam(required = false) String title) {
+        List<Book> books = title == null ? bookService.list() : bookService.search(title);
+        return books.stream().map(BookResponse::from).toList();
     }
 
     @GetMapping("/{bookUuid}")

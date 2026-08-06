@@ -29,6 +29,8 @@ import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWit
 import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
 import static org.springframework.restdocs.payload.JsonFieldType.ARRAY;
+import static org.springframework.restdocs.request.RequestDocumentation.parameterWithName;
+import static org.springframework.restdocs.request.RequestDocumentation.queryParameters;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -157,6 +159,47 @@ class BookControllerWebMvcTest {
                 .andExpect(jsonPath("$[0].bookTitle").value("Clean Architecture"))
                 .andExpect(jsonPath("$[0].authors").isArray())
                 .andDo(document("book-list"));
+
+        verify(bookService, never()).search(any());
+    }
+
+    // search: ?title= switches the collection read from "list everything" to "find these"
+    @Test
+    void search_returnsMatchingBooks() throws Exception {
+        Book book = new Book(UUID.randomUUID(), "Clean Architecture", "desc",
+                new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, null);
+        when(bookService.search("clean")).thenReturn(List.of(book));
+
+        mockMvc.perform(get("/api/books").param("title", "clean"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].bookTitle").value("Clean Architecture"))
+                .andDo(document("book-search",
+                        queryParameters(
+                                parameterWithName("title").description(
+                                        "Substring of the book title to search for, case-insensitive. "
+                                                + "Omit to list the whole catalogue."))));
+
+        verify(bookService, never()).list();
+    }
+
+    // a blank title is a search with nothing to search for -> 400, not the whole catalogue
+    @Test
+    void search_returns400_whenTitleBlank() throws Exception {
+        when(bookService.search("  ")).thenThrow(new BlankSearchQueryException());
+
+        mockMvc.perform(get("/api/books").param("title", "  "))
+                .andExpect(status().isBadRequest());
+
+        verify(bookService, never()).list();
+    }
+
+    // reads stay public: search needs no token
+    @Test
+    void search_isPublic_whenAnonymous() throws Exception {
+        when(bookService.search("clean")).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/books").param("title", "clean"))
+                .andExpect(status().isOk());
     }
 
     // update: delegates to the service with the path uuid and parsed body
