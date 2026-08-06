@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.bookserver.purchase.dto.CancelItemRequest;
 import com.example.bookserver.purchase.dto.OrderDetailResponse;
 import com.example.bookserver.purchase.dto.OrderSummaryResponse;
 import com.example.bookserver.purchase.dto.PaymentIntentResponse;
@@ -77,6 +78,22 @@ public class PurchaseController {
     @PostMapping("/{purchaseUuid}/cancel")
     public void cancel(@AuthenticationPrincipal UUID userUuid, @PathVariable UUID purchaseUuid) {
         purchaseService.cancel(userUuid, purchaseUuid);
+    }
+
+    /**
+     * Drop some copies of one book from the order, leaving the rest of it live. A paid order has
+     * that share of the money returned.
+     *
+     * <p>Addressed as an item of the order rather than as a flag on the order-level cancel: what
+     * is being cancelled is the line, and naming it in the path says so without a request body
+     * that means different things depending on which fields are present.
+     */
+    @PostMapping("/{purchaseUuid}/items/{bookUuid}/cancel")
+    public void cancelItem(@AuthenticationPrincipal UUID userUuid,
+                           @PathVariable UUID purchaseUuid,
+                           @PathVariable UUID bookUuid,
+                           @Valid @RequestBody CancelItemRequest request) {
+        purchaseService.cancelItem(userUuid, purchaseUuid, bookUuid, request.quantity());
     }
 
     // --- fulfillment lifecycle (#26). prepare/ship/deliver are admin-only (enforced in

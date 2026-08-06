@@ -27,6 +27,8 @@ import com.example.bookserver.payment.RefundFailedException;
 import com.example.bookserver.purchase.EmptyCartException;
 import com.example.bookserver.purchase.IllegalOrderStateException;
 import com.example.bookserver.purchase.InsufficientInventoryException;
+import com.example.bookserver.purchase.InvalidCancellationException;
+import com.example.bookserver.purchase.OrderItemNotFoundException;
 import com.example.bookserver.purchase.OrderNotFoundException;
 import com.example.bookserver.user.DuplicateUserIdException;
 import com.example.bookserver.user.InvalidCredentialsException;
@@ -86,6 +88,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     /** A postal code that does not match its country's expected format. */
     @ExceptionHandler(InvalidPostalCodeException.class)
     public ProblemDetail handleInvalidPostalCode(InvalidPostalCodeException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** Cancelling a line the order does not hold. */
+    @ExceptionHandler(OrderItemNotFoundException.class)
+    public ProblemDetail handleOrderItemNotFound(OrderItemNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Cancelling more copies than the order holds, or none at all. */
+    @ExceptionHandler(InvalidCancellationException.class)
+    public ProblemDetail handleInvalidCancellation(InvalidCancellationException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
