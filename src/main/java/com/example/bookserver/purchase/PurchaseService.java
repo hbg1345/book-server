@@ -171,7 +171,7 @@ public class PurchaseService {
         if (payment == null) {
             payment = new Payment(Uuids.newId(), purchaseUuid, paymentGateway.provider(),
                     result.providerIntentId(), current.getPrice(), PaymentStatus.PENDING,
-                    idempotencyKey, null, null);
+                    BigDecimal.ZERO, idempotencyKey, null, null);   // nothing refunded yet
             paymentMapper.insert(payment);
         }
         return new OpenedPayment(payment, result.clientSecret());

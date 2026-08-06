@@ -1,5 +1,6 @@
 package com.example.bookserver.payment;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 import org.apache.ibatis.annotations.Insert;
@@ -48,4 +49,25 @@ public interface PaymentMapper {
             WHERE payment_uuid = #{paymentUuid}
             """)
     int updateStatus(@Param("paymentUuid") UUID paymentUuid, @Param("status") PaymentStatus status);
+
+    // Record money going back, and settle the status from the running total in the same statement.
+    //
+    // The guard is `refunded_amount + #{amount} <= amount`, evaluated by the database with the row
+    // locked. Reading the row, adding in Java and writing it back would let two refunds that
+    // overlap each read the same starting figure and each conclude there is room — and the
+    // customer is handed back more than they ever paid. Returns 0 when there is not enough left,
+    // so the caller can tell a rejected refund from a recorded one without a second read.
+    //
+    // REFUNDED once the whole charge has gone back, PAID while some of it is still held: the
+    // status stays a summary of the number rather than a separate thing to keep in step.
+    @Update("""
+            UPDATE payment SET
+                refunded_amount = refunded_amount + #{amount},
+                status = CASE WHEN refunded_amount + #{amount} >= amount
+                              THEN 'REFUNDED' ELSE status END,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE payment_uuid = #{paymentUuid}
+              AND refunded_amount + #{amount} <= amount
+            """)
+    int recordRefund(@Param("paymentUuid") UUID paymentUuid, @Param("amount") BigDecimal amount);
 }

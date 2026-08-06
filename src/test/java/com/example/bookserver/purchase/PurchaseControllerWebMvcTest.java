@@ -267,7 +267,7 @@ class PurchaseControllerWebMvcTest {
 
     private static Payment payment(UUID purchase, PaymentStatus status) {
         return new Payment(UUID.randomUUID(), purchase, "STRIPE", "pi_1",
-                new BigDecimal("79.98"), status, "order-" + purchase, null, null);
+                new BigDecimal("79.98"), status, BigDecimal.ZERO, "order-" + purchase, null, null);
     }
 
     // payment-intent: 200 with the client secret; delegates to the service. No request body —
