@@ -22,6 +22,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.jdbc.Sql;
 
+import com.example.bookserver.Concurrently;
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.book.Book;
 import com.example.bookserver.book.BookMapper;
@@ -31,6 +32,8 @@ import com.example.bookserver.payment.IntentRequest;
 import com.example.bookserver.payment.IntentResult;
 import com.example.bookserver.payment.OpenedPayment;
 import com.example.bookserver.payment.PaymentGateway;
+import com.example.bookserver.payment.PaymentMapper;
+import com.example.bookserver.payment.PaymentStatus;
 import com.example.bookserver.payment.RefundRequest;
 import com.example.bookserver.payment.RefundResult;
 import com.example.bookserver.purchase.dto.PlaceOrderRequest;
@@ -91,6 +94,12 @@ class PurchaseConcurrencyTest {
     private BookMapper bookMapper;
     @Autowired
     private UserMapper userMapper;
+    @Autowired
+    private PurchaseCurrentMapper currentMapper;
+    @Autowired
+    private PurchaseHistoryMapper historyMapper;
+    @Autowired
+    private PaymentMapper paymentMapper;
 
     private static PlaceOrderRequest inlineOrder() {
         return new PlaceOrderRequest(null,
@@ -125,34 +134,6 @@ class PurchaseConcurrencyTest {
     }
 
     /**
-     * Run every task at once and return their results. The latch is the point: submitting to a
-     * pool only makes the tasks eligible to run, and threads that start milliseconds apart
-     * serialise on their own rather than contending, which is how a concurrency test quietly
-     * stops testing concurrency.
-     */
-    private <T> List<T> runAtOnce(List<Callable<T>> tasks) throws Exception {
-        ExecutorService pool = Executors.newFixedThreadPool(tasks.size());
-        CountDownLatch start = new CountDownLatch(1);
-        try {
-            List<Future<T>> futures = new ArrayList<>();
-            for (Callable<T> task : tasks) {
-                futures.add(pool.submit(() -> {
-                    start.await();
-                    return task.call();
-                }));
-            }
-            start.countDown();
-            List<T> results = new ArrayList<>();
-            for (Future<T> future : futures) {
-                results.add(future.get(60, TimeUnit.SECONDS));
-            }
-            return results;
-        } finally {
-            pool.shutdownNow();
-        }
-    }
-
-    /**
      * Twenty buyers, ten copies, one book. Exactly ten orders may exist afterwards and the
      * inventory must land on zero — never below it, and never with an eleventh buyer holding
      * an order for stock that was not there.
@@ -180,7 +161,7 @@ class PurchaseConcurrencyTest {
             });
         }
 
-        List<Boolean> results = runAtOnce(orders);
+        List<Boolean> results = Concurrently.runAtOnce(orders);
 
         long placed = results.stream().filter(Boolean::booleanValue).count();
         assertThat(placed).isEqualTo(stock);
@@ -210,7 +191,7 @@ class PurchaseConcurrencyTest {
             UUID purchaseUuid = purchaseService.placeOrder(userUuid, inlineOrder());
             assertThat(bookMapper.findById(bookUuid).getInventory()).isEqualTo(stock - ordered);
 
-            runAtOnce(List.<Callable<Void>>of(
+            Concurrently.runAtOnce(List.<Callable<Void>>of(
                     () -> cancelQuietly(userUuid, purchaseUuid),
                     () -> cancelQuietly(userUuid, purchaseUuid),
                     () -> expireQuietly(purchaseUuid),
@@ -220,6 +201,38 @@ class PurchaseConcurrencyTest {
                     .as("attempt %d: the reservation is released once, however many cancels arrive", attempt)
                     .isEqualTo(stock);
         }
+    }
+
+    /**
+     * Checkout submitted twice — a double-click, an impatient retry, two open tabs.
+     *
+     * <p>Nothing here locks the cart, and each call mints its own purchase_uuid, so the two
+     * transactions never contend on a row: both read the same cart, both reserve stock, and the
+     * user ends up owing for two orders they meant to place once.
+     *
+     * <p>See #56. The order-row lock does not reach this — there is no order row yet to lock.
+     */
+    @Test
+    void doubleSubmittedCheckout_createsOneOrder() throws Exception {
+        int stock = 10;
+        UUID bookUuid = persistBook(stock);
+        UUID userUuid = persistUser();
+        cartService.addItem(userUuid, bookUuid, 2);
+
+        Concurrently.runAtOnce(2, () -> {
+            try {
+                return purchaseService.placeOrder(userUuid, inlineOrder());
+            } catch (EmptyCartException | InsufficientInventoryException e) {
+                return null;   // the legitimate way to lose: the winner already took the cart
+            }
+        });
+
+        assertThat(currentMapper.findByUserUuid(userUuid))
+                .as("one checkout, one order")
+                .hasSize(1);
+        assertThat(bookMapper.findById(bookUuid).getInventory())
+                .as("stock is reserved once, not once per submission")
+                .isEqualTo(stock - 2);
     }
 
     /**
@@ -245,12 +258,89 @@ class PurchaseConcurrencyTest {
         purchaseService.markPaymentSucceeded(opened.payment().getProviderTxnId(), new BigDecimal("20.00"));
         assertThat(bookMapper.findById(bookUuid).getInventory()).isEqualTo(stock - ordered);
 
-        runAtOnce(List.<Callable<Void>>of(
+        Concurrently.runAtOnce(List.<Callable<Void>>of(
                 () -> cancelQuietly(userUuid, purchaseUuid),
                 () -> cancelQuietly(userUuid, purchaseUuid)));
 
         verify(paymentGateway, times(1)).refund(any(RefundRequest.class));
         assertThat(bookMapper.findById(bookUuid).getInventory()).isEqualTo(stock);
+    }
+
+    /**
+     * The expiry timer and the customer's card confirmation land together. Cloud Tasks fires at
+     * exactly {@code placed + payment timeout}, so this is the customer who confirms at the
+     * deadline rather than an exotic interleaving.
+     *
+     * <p>The assertion is deliberately weaker than "the order survives": it only says the
+     * customer is never left having paid for an order that no longer exists. Reviving the order,
+     * refunding automatically, or refusing to expire an order with an open intent would each
+     * satisfy it, so the test does not prejudge which fix #57 gets.
+     *
+     * <p>Ordering is settled by the row lock; what this pins is the <em>outcome</em> when expiry
+     * wins, which today is a PAID payment sitting on a CANCELLED order with nothing recorded.
+     */
+    @Test
+    void paymentLandingAfterExpiry_neverLeavesTheCustomerChargedWithoutAnOrder() throws Exception {
+        UUID bookUuid = persistBook(10);
+        UUID userUuid = persistUser();
+        cartService.addItem(userUuid, bookUuid, 2);
+        UUID purchaseUuid = purchaseService.placeOrder(userUuid, inlineOrder());
+        OpenedPayment opened = purchaseService.openPaymentIntent(userUuid, purchaseUuid);
+        String providerTxnId = opened.payment().getProviderTxnId();
+
+        Concurrently.runAtOnce(List.<Callable<Void>>of(
+                () -> expireQuietly(purchaseUuid),
+                () -> {
+                    purchaseService.markPaymentSucceeded(providerTxnId, new BigDecimal("20.00"));
+                    return null;
+                }));
+
+        PurchaseState state = currentMapper.findByPurchaseUuid(purchaseUuid).getPurchaseState();
+        PaymentStatus paymentStatus = paymentMapper.findByPurchaseUuid(purchaseUuid).getStatus();
+
+        if (paymentStatus == PaymentStatus.PAID) {
+            assertThat(state)
+                    .as("money was taken, so the order must exist for the customer to receive")
+                    .isNotIn(PurchaseState.CANCELLED);
+        } else {
+            assertThat(paymentStatus)
+                    .as("the order is gone, so the charge must not be kept")
+                    .isIn(PaymentStatus.REFUNDED, PaymentStatus.FAILED);
+        }
+    }
+
+    /**
+     * Stripe guarantees at-least-once delivery, so a webhook arriving twice is routine rather
+     * than exotic, and the two deliveries can overlap.
+     *
+     * <p>Expected to pass already: the early return on {@code status == PAID} is itself a
+     * read-then-write and both deliveries can slip past it, but the second write sets the same
+     * value, and the order transition behind it is guarded by the row lock — the loser re-reads
+     * ORDERED and does nothing. The value here is regression cover: it pins that the timeline
+     * gains one ORDERED event and not two, which is what an audit log is worth.
+     *
+     * <p>See #59.
+     */
+    @Test
+    void duplicateSucceededWebhooks_advanceTheOrderOnce() throws Exception {
+        UUID bookUuid = persistBook(10);
+        UUID userUuid = persistUser();
+        cartService.addItem(userUuid, bookUuid, 2);
+        UUID purchaseUuid = purchaseService.placeOrder(userUuid, inlineOrder());
+        OpenedPayment opened = purchaseService.openPaymentIntent(userUuid, purchaseUuid);
+        String providerTxnId = opened.payment().getProviderTxnId();
+
+        Concurrently.runAtOnce(2, () -> {
+            purchaseService.markPaymentSucceeded(providerTxnId, new BigDecimal("20.00"));
+            return null;
+        });
+
+        assertThat(currentMapper.findByPurchaseUuid(purchaseUuid).getPurchaseState())
+                .isEqualTo(PurchaseState.ORDERED);
+        assertThat(historyMapper.findAllByPurchaseUuid(purchaseUuid))
+                .as("the timeline records the transition once")
+                .filteredOn(event -> event.getPurchaseState() == PurchaseState.ORDERED)
+                .hasSize(1);
     }
 
     /** Losing a cancel race is legitimate: the order is already cancelled by the winner. */

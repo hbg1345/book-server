@@ -22,8 +22,15 @@ public interface RefreshTokenMapper {
     RefreshToken findByHash(String tokenHash);
 
     // rotation: mark a token consumed so a later replay is detectable
-    @Update("UPDATE refresh_token SET used = TRUE WHERE token_id = #{tokenId}")
-    void markUsed(UUID tokenId);
+    // Claim the token for rotation. The `used = FALSE` condition is the guard, and it lives in the
+    // statement rather than in a Java `if`: two tabs refreshing together both read used = false,
+    // and rotating on that stale read mints two successors from one token — the family then holds
+    // two live tokens and the replay detection this whole scheme exists for never fires.
+    //
+    // Returns the number of rows updated: 1 for the caller that claimed it, 0 for one that arrived
+    // after someone else did.
+    @Update("UPDATE refresh_token SET used = TRUE WHERE token_id = #{tokenId} AND used = FALSE")
+    int markUsed(UUID tokenId);
 
     // reuse detection / logout: kill every token in the family at once
     @Update("UPDATE refresh_token SET revoked = TRUE WHERE family_id = #{familyId}")

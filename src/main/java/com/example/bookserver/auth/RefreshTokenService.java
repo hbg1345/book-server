@@ -63,7 +63,13 @@ public class RefreshTokenService {
         if (row.getExpiresAt().isBefore(LocalDateTime.now())) {
             throw new InvalidRefreshTokenException();
         }
-        refreshTokenMapper.markUsed(row.getTokenId());
+        if (refreshTokenMapper.markUsed(row.getTokenId()) == 0) {
+            // Someone claimed this token between our read and our write. Rejected, but NOT treated
+            // as theft: the usual cause is the owner's own client refreshing twice at once, and
+            // revoking the family would log a legitimate user out of every session. A genuine
+            // replay still hits the `isUsed` branch above on any later attempt.
+            throw new InvalidRefreshTokenException();
+        }
         String newToken = issueInFamily(row.getUserUuid(), row.getFamilyId());
         return new RotationResult(row.getUserUuid(), newToken);
     }

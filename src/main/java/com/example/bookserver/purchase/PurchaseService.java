@@ -98,7 +98,10 @@ public class PurchaseService {
         // bad or not-owned address fails fast rather than reserving inventory then rolling back.
         OrderAddress delivery = resolveDeliveryAddress(purchaseUuid, userUuid, req);
 
-        List<CartItemView> cart = cartService.listMyCart(userUuid);
+        // Claim the cart lines: a second submission of the same checkout blocks here and finds
+        // them gone, rather than turning one cart into two orders (there is no order row to
+        // contend on — each call mints its own purchase_uuid).
+        List<CartItemView> cart = cartService.listMyCartForUpdate(userUuid);
         if (cart.isEmpty()) {
             throw new EmptyCartException();
         }
@@ -211,7 +214,36 @@ public class PurchaseService {
         PurchaseCurrent current = currentMapper.findByPurchaseUuidForUpdate(payment.getPurchaseUuid());
         if (current != null && current.getPurchaseState() == PurchaseState.PAYMENT_PENDING) {
             transition(current, PurchaseState.ORDERED);
+        } else if (current == null || current.getPurchaseState() == PurchaseState.CANCELLED) {
+            returnUnexpectedCharge(payment, current);
         }
+    }
+
+    /**
+     * The charge arrived for an order that is no longer there — the expiry timer reached it while
+     * the customer was confirming their card, which Cloud Tasks makes likely rather than exotic
+     * since it fires at exactly {@code placed + payment timeout}.
+     *
+     * <p>Keeping the money would leave the customer paying for nothing, and the order cannot
+     * simply be revived: its stock was released and may already belong to someone else. So the
+     * charge goes back. Nobody asked for it, which is what makes refunding it safe to do without
+     * a human — but it is still an anomaly worth a loud line, because a customer who thinks they
+     * bought a book will contact support regardless of the refund.
+     */
+    private void returnUnexpectedCharge(Payment payment, PurchaseCurrent current) {
+        log.warn("Payment {} landed on an order that is {} — refunding the charge",
+                payment.getProviderTxnId(), current == null ? "gone" : current.getPurchaseState());
+
+        RefundResult result = paymentGateway.refund(new RefundRequest(
+                payment.getProviderTxnId(), payment.getAmount(), payment.getIdempotencyKey() + "-refund"));
+        if (!result.success()) {
+            // Leave the row PAID and fail loudly: the webhook is retried by the provider, so a
+            // transient refund failure gets another attempt rather than being written off here.
+            log.error("Could not refund unexpected payment {}: {}",
+                    payment.getProviderTxnId(), result.failureReason());
+            throw new RefundFailedException(payment.getPurchaseUuid());
+        }
+        paymentMapper.updateStatus(payment.getPaymentUuid(), PaymentStatus.REFUNDED);
     }
 
     /**
