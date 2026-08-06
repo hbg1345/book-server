@@ -1,27 +1,20 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <project name="book_sever" database="LogicalDesign" id="ad2d4428-610f-427f-8cdd-9c479ccfbced" >
 	<schema name="Schema_" >
-		<table name="Entity" />
 		<table name="author" prior="Enti" >
 			<column name="author_uuid" type="UUID" mandatory="y" />
 			<column name="author_name" type="TEXT" mandatory="y" />
-			<index name="pk_author_uuid" unique="UNIQUE_KEY" >
-				<column name="author_uuid" />
-			</index>
-			<index name="unq_author_author_uuid" unique="UNIQUE_KEY" >
-				<column name="author_uuid" />
-			</index>
 			<index name="pk_author" unique="PRIMARY_KEY" >
 				<column name="author_uuid" />
 			</index>
 		</table>
 		<table name="book" prior="bo" >
 			<column name="book_uuid" type="UUID" mandatory="y" />
-			<column name="book_title" prior="book_name" type="VARCHAR" mandatory="y" />
+			<column name="book_title" prior="book_name" type="VARCHAR" length="255" mandatory="y" />
 			<column name="book_description" type="TEXT" />
-			<column name="price" type="DECIMAL" mandatory="y" />
+			<column name="price" type="DECIMAL" length="10" decimal="2" mandatory="y" />
 			<column name="publish_date" type="DATE" mandatory="y" />
-			<column name="publisher" type="NVARCHAR" length="100" mandatory="y" />
+			<column name="publisher" type="VARCHAR" length="100" mandatory="y" />
 			<column name="inventory" type="INT" mandatory="y" />
 			<column name="category_uuid" type="UUID" />
 			<index name="pk_book" unique="PRIMARY_KEY" >
@@ -37,15 +30,9 @@
 		<table name="book_author" prior="book_auth" >
 			<column name="book_uuid" type="UUID" mandatory="y" />
 			<column name="author_uuid" prior="author" type="UUID" mandatory="y" />
-			<index name="idx_book_author" unique="UNIQUE_KEY" >
+			<index name="pk_book_author" unique="PRIMARY_KEY" >
 				<column name="book_uuid" />
 				<column name="author_uuid" />
-			</index>
-			<index name="pk_book_uuid" unique="PRIMARY_KEY" >
-				<column name="book_uuid" />
-			</index>
-			<index name="unq_book_author_book_uuid" unique="UNIQUE_KEY" >
-				<column name="book_uuid" />
 			</index>
 			<fk name="fk_book_author_book" to_schema="Schema_" to_table="book" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
 				<fk_column name="book_uuid" pk="book_uuid" />
@@ -56,24 +43,26 @@
 		</table>
 		<table name="book_user" prior="book_" >
 			<column name="user_uuid" prior="user_id" type="UUID" mandatory="y" />
-			<column name="user_name" type="NVARCHAR" length="100" mandatory="y" />
-			<column name="user_password" prior="user_id" type="VARCHAR" length="100" mandatory="y" />
-			<column name="user_id" type="VARCHAR" mandatory="y" />
-			<column name="created_at" type="DATETIME" length="9999999" mandatory="y" />
+			<column name="user_name" type="VARCHAR" length="100" mandatory="y" />
+			<column name="user_password" prior="user_id" type="VARCHAR" length="255" mandatory="y" />
+			<column name="user_id" type="VARCHAR" length="100" mandatory="y" />
+			<column name="created_at" type="DATETIME" mandatory="y" />
 			<column name="birth_date" type="DATE" mandatory="y" />
-			<column name="phone" type="VARCHAR" mandatory="y" />
-			<column name="role" type="VARCHAR" length="20" mandatory="y" />
+			<column name="phone" type="VARCHAR" length="20" mandatory="y" />
+			<column name="role" type="ENUM" length="20" mandatory="y" />
 			<index name="pk_book_user" unique="PRIMARY_KEY" >
 				<column name="user_uuid" />
 			</index>
+			<index name="unq_book_user_user_id" unique="UNIQUE_KEY" >
+				<column name="user_id" />
+			</index>
 		</table>
-		<table name="cart" prior="car" />
 		<table name="cart_item" prior="Entity_0" >
 			<column name="user_uuid" type="UUID" mandatory="y" />
 			<column name="book_uuid" type="UUID" mandatory="y" />
 			<column name="quantity" type="INT" mandatory="y" />
 			<column name="created_at" type="DATETIME" mandatory="y" />
-			<index name="unq_cart_item" unique="UNIQUE_KEY" >
+			<index name="pk_cart_item" unique="PRIMARY_KEY" >
 				<column name="user_uuid" />
 				<column name="book_uuid" />
 			</index>
@@ -131,13 +120,13 @@
 			</fk>
 		</table>
 		<table name="purchase_book_history" prior="purchase_book" >
-			<column name="book_uuid" type="UUID" mandatory="y" />
-			<column name="price" type="DECIMAL" length="9999999" mandatory="y" />
-			<column name="quantity" type="INT" mandatory="y" />
-			<column name="purchase_state" type="ENUM" mandatory="y" />
-			<column name="updated_at" type="DATETIME" mandatory="y" />
 			<column name="history_uuid" type="UUID" mandatory="y" />
-			<index name="unq_purchase_book_history_history_uuid" unique="UNIQUE_KEY" >
+			<column name="book_uuid" type="UUID" mandatory="y" />
+			<column name="purchase_state" type="ENUM" mandatory="y" />
+			<column name="quantity" type="INT" mandatory="y" />
+			<column name="price" type="DECIMAL" length="10" decimal="2" mandatory="y" />
+			<column name="updated_at" type="DATETIME" mandatory="y" />
+			<index name="pk_purchase_book_history" unique="PRIMARY_KEY" >
 				<column name="history_uuid" />
 				<column name="book_uuid" />
 			</index>
@@ -149,22 +138,23 @@
 			</fk>
 		</table>
 		<table name="purchase_current" prior="purchase_history_0" >
-			<column name="history_uuid" prior="hisotry_uuid" type="UUID" mandatory="y" />
 			<column name="purchase_uuid" prior="purcase_uuid" type="UUID" mandatory="y" />
 			<column name="user_uuid" type="UUID" mandatory="y" />
+			<column name="history_uuid" prior="hisotry_uuid" type="UUID" mandatory="y" />
 			<column name="purchase_state" prior="state" type="ENUM" mandatory="y" />
+			<column name="price" type="DECIMAL" length="10" decimal="2" mandatory="y" />
 			<column name="updated_at" prior="order_datetime" type="DATETIME" mandatory="y" />
-			<column name="price" type="DECIMAL" length="9999999" mandatory="y" />
+			<column name="tracking_number" type="VARCHAR" length="64" />
 			<index name="pk_purchase_current" unique="PRIMARY_KEY" >
 				<column name="purchase_uuid" />
 			</index>
 			<index name="idx_purchase_current_user" unique="NORMAL" >
 				<column name="user_uuid" />
 			</index>
-			<fk name="fk_purchase_book_user_0" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="n" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
+			<fk name="fk_purchase_book_user_0" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
 				<fk_column name="user_uuid" pk="user_uuid" />
 			</fk>
-			<fk name="fk_purchase_current" to_schema="Schema_" to_table="purchase_history" type="NonIdentifying" mandatory="y" cardinality="One" range_from="0" range_to="0" >
+			<fk name="fk_purchase_current" to_schema="Schema_" to_table="purchase_history" type="NonIdentifying" mandatory="y" cardinality="One" range_from="0" range_to="0" delete_action="cascade" >
 				<fk_column name="history_uuid" pk="history_uuid" />
 			</fk>
 		</table>
@@ -173,15 +163,52 @@
 			<column name="purchase_uuid" prior="purcase_uuid" type="UUID" mandatory="y" />
 			<column name="user_uuid" type="UUID" mandatory="y" />
 			<column name="purchase_state" prior="state" type="ENUM" mandatory="y" />
+			<column name="price" type="DECIMAL" length="10" decimal="2" mandatory="y" />
 			<column name="updated_at" prior="order_datetime" type="DATETIME" mandatory="y" />
-			<column name="price" type="DECIMAL" length="9999999" mandatory="y" />
 			<index name="pk_purchase" unique="PRIMARY_KEY" >
 				<column name="history_uuid" />
 			</index>
 			<fk name="fk_purchase_book_user" to_schema="Schema_" to_table="book_user" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
 				<fk_column name="user_uuid" pk="user_uuid" />
 			</fk>
-			<fk name="fk_purchase_history" to_schema="Schema_" to_table="purchase_current" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" >
+		</table>
+		<table name="order_address" prior="order_addr" >
+			<column name="purchase_uuid" type="UUID" mandatory="y" />
+			<column name="recipient" type="VARCHAR" length="100" mandatory="y" />
+			<column name="phone" type="VARCHAR" length="20" mandatory="y" />
+			<column name="country" type="CHAR" length="2" mandatory="y" />
+			<column name="road_address" type="VARCHAR" length="255" mandatory="y" />
+			<column name="detail_address" type="VARCHAR" length="255" />
+			<column name="postal_code" type="VARCHAR" length="20" mandatory="y" />
+			<column name="source_address_uuid" type="UUID" />
+			<column name="created_at" type="DATETIME" mandatory="y" />
+			<index name="pk_order_address" unique="PRIMARY_KEY" >
+				<column name="purchase_uuid" />
+			</index>
+			<fk name="fk_order_address_purchase" to_schema="Schema_" to_table="purchase_current" type="NonIdentifying" mandatory="y" cardinality="One" range_from="0" range_to="0" delete_action="cascade" >
+				<fk_column name="purchase_uuid" pk="purchase_uuid" />
+			</fk>
+		</table>
+		<table name="payment" prior="pay" >
+			<column name="payment_uuid" type="UUID" mandatory="y" />
+			<column name="purchase_uuid" type="UUID" mandatory="y" />
+			<column name="provider" type="VARCHAR" length="20" mandatory="y" />
+			<column name="provider_txn_id" type="VARCHAR" length="255" />
+			<column name="amount" type="DECIMAL" length="10" decimal="2" mandatory="y" />
+			<column name="status" type="ENUM" length="20" mandatory="y" />
+			<column name="idempotency_key" type="VARCHAR" length="255" mandatory="y" />
+			<column name="created_at" type="DATETIME" mandatory="y" />
+			<column name="updated_at" type="DATETIME" mandatory="y" />
+			<index name="pk_payment" unique="PRIMARY_KEY" >
+				<column name="payment_uuid" />
+			</index>
+			<index name="unq_payment_idempotency_key" unique="UNIQUE_KEY" >
+				<column name="idempotency_key" />
+			</index>
+			<index name="idx_payment_purchase" unique="NORMAL" >
+				<column name="purchase_uuid" />
+			</index>
+			<fk name="fk_payment_purchase" to_schema="Schema_" to_table="purchase_current" type="NonIdentifying" mandatory="y" cardinality="ZeroMore" range_from="0" range_to="0" delete_action="cascade" >
 				<fk_column name="purchase_uuid" pk="purchase_uuid" />
 			</fk>
 		</table>
@@ -217,6 +244,8 @@
 			<entity schema="Schema_" name="book_user" color="C1D8EE" x="57" y="57" />
 			<entity schema="Schema_" name="cart_item" color="C1D8EE" x="304" y="57" />
 			<entity schema="Schema_" name="category" color="C1D8EE" x="817" y="171" />
+			<entity schema="Schema_" name="order_address" color="C1D8EE" x="152" y="817" />
+			<entity schema="Schema_" name="payment" color="C1D8EE" x="437" y="817" />
 			<entity schema="Schema_" name="purchase_book_history" color="C1D8EE" x="741" y="323" />
 			<entity schema="Schema_" name="purchase_current" color="3986C1" x="152" y="323" />
 			<entity schema="Schema_" name="purchase_history" color="C1D8EE" x="437" y="323" />

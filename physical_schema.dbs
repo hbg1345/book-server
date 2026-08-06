@@ -155,6 +155,57 @@
 				<column name="success" />
 			</index>
 		</table>
+		<table name="order_address" spec="" >
+			<column name="purchase_uuid" type="uuid" mandatory="y" />
+			<column name="recipient" type="varchar" length="100" mandatory="y" />
+			<column name="phone" type="varchar" length="20" mandatory="y" />
+			<column name="country" type="char" length="2" mandatory="y" >
+				<defo><![CDATA['KR'::bpchar]]></defo>
+			</column>
+			<column name="road_address" type="varchar" length="255" mandatory="y" />
+			<column name="detail_address" type="varchar" length="255" />
+			<column name="postal_code" type="varchar" length="20" mandatory="y" />
+			<column name="source_address_uuid" type="uuid" />
+			<column name="created_at" type="timestamp" mandatory="y" >
+				<defo><![CDATA[CURRENT_TIMESTAMP]]></defo>
+			</column>
+			<index name="order_address_pkey" unique="PRIMARY_KEY" >
+				<column name="purchase_uuid" />
+			</index>
+			<fk name="order_address_purchase_uuid_fkey" to_schema="bookdb.public" to_table="purchase_current" delete_action="cascade" >
+				<fk_column name="purchase_uuid" pk="purchase_uuid" />
+			</fk>
+		</table>
+		<table name="payment" spec="" >
+			<column name="payment_uuid" type="uuid" mandatory="y" />
+			<column name="purchase_uuid" type="uuid" mandatory="y" />
+			<column name="provider" type="varchar" length="20" mandatory="y" />
+			<column name="provider_txn_id" type="varchar" length="255" />
+			<column name="amount" type="numeric" length="10" decimal="2" mandatory="y" />
+			<column name="status" type="varchar" length="20" mandatory="y" />
+			<column name="idempotency_key" type="varchar" length="255" mandatory="y" />
+			<column name="created_at" type="timestamp" mandatory="y" >
+				<defo><![CDATA[CURRENT_TIMESTAMP]]></defo>
+			</column>
+			<column name="updated_at" type="timestamp" mandatory="y" >
+				<defo><![CDATA[CURRENT_TIMESTAMP]]></defo>
+			</column>
+			<index name="payment_pkey" unique="PRIMARY_KEY" >
+				<column name="payment_uuid" />
+			</index>
+			<index name="payment_idempotency_key_key" unique="UNIQUE_KEY" >
+				<column name="idempotency_key" />
+			</index>
+			<index name="idx_payment_purchase" unique="NORMAL" spec="USING  btree" >
+				<column name="purchase_uuid" />
+			</index>
+			<constraint name="payment_status_check" type="CHECK" options="" >
+				<string><![CDATA[status)::text = ANY ((ARRAY['PENDING'::character varying, 'PAID'::character varying, 'FAILED'::character varying, 'REFUNDED'::character varying, 'REFUND_FAILED'::character varying])::text[]]]></string>
+			</constraint>
+			<fk name="payment_purchase_uuid_fkey" to_schema="bookdb.public" to_table="purchase_current" delete_action="cascade" >
+				<fk_column name="purchase_uuid" pk="purchase_uuid" />
+			</fk>
+		</table>
 		<table name="purchase_book_history" spec="" >
 			<column name="history_uuid" type="uuid" mandatory="y" />
 			<column name="book_uuid" type="uuid" mandatory="y" />
@@ -183,6 +234,7 @@
 			<column name="purchase_state" type="varchar" length="20" mandatory="y" />
 			<column name="price" type="numeric" length="10" decimal="2" mandatory="y" />
 			<column name="updated_at" type="timestamp" mandatory="y" />
+			<column name="tracking_number" type="varchar" length="64" />
 			<index name="purchase_current_pkey" unique="PRIMARY_KEY" >
 				<column name="purchase_uuid" />
 			</index>
@@ -255,16 +307,12 @@
 			<entity schema="bookdb.public" name="cart_item" color="C7F4BE" x="304" y="57" />
 			<entity schema="bookdb.public" name="category" color="C7F4BE" x="817" y="171" />
 			<entity schema="bookdb.public" name="flyway_schema_history" color="3986C1" x="969" y="589" />
+			<entity schema="bookdb.public" name="order_address" color="BED3F4" x="513" y="589" />
+			<entity schema="bookdb.public" name="payment" color="BED3F4" x="741" y="589" />
 			<entity schema="bookdb.public" name="purchase_book_history" color="BED3F4" x="741" y="323" />
 			<entity schema="bookdb.public" name="purchase_current" color="BED3F4" x="152" y="323" />
 			<entity schema="bookdb.public" name="purchase_history" color="BED3F4" x="437" y="323" />
 			<entity schema="bookdb.public" name="refresh_token" color="BED3F4" x="57" y="589" />
-			<callout x="266" y="57" pointer="Round" >
-				<comment><![CDATA[- 다이어그램을 우클릭하여 새 테이블을 생성합니다.
-- 테이블 헤더를 더블 클릭하여 편집할 수 있습니다.
-- 여러 다이어그램을 만들어 스키마를 더 잘 이해하기 위함.
-- 설계를 모델 파일에 저장하고, '스키마 / 데이터베이스로 설정'에서 배포합니다.]]></comment>
-			</callout>
 		</diagram>
 	</diagram_group>
 </project>
