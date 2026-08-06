@@ -39,6 +39,30 @@ public interface BookMapper {
     @Select("SELECT * FROM book ORDER BY book_uuid DESC")
     List<Book> findAll();
 
+    // One page of the same newest-first list.
+    //
+    // The ORDER BY is what makes a page mean anything: without a total order the database may
+    // return rows in any order it likes, and "the next 20" would overlap or skip rows at random.
+    // book_uuid is UUIDv7 and therefore time-ordered, so DESC is newest-first and costs nothing
+    // extra — the primary key index already provides it.
+    //
+    // OFFSET does not skip rows, it reads and discards them, so a deep page pays for every row
+    // before it. The caller is expected to bound how deep it will go (see BookService.MAX_PAGE);
+    // this method does not police that, it just does what it is asked.
+    @Select("""
+            SELECT * FROM book
+            ORDER BY book_uuid DESC
+            LIMIT #{limit} OFFSET #{offset}
+            """)
+    List<Book> findPage(@Param("limit") int limit, @Param("offset") int offset);
+
+    // How many books there are, for the page count the client shows. A separate statement
+    // rather than a window function over the page: counting inside the paged query makes the
+    // database compute the total for every row it returns, and the total does not change with
+    // the page.
+    @Select("SELECT count(*) FROM book")
+    long countAll();
+
     // Title search: substring match, case-insensitive, newest first (book_uuid is UUIDv7).
     //
     // The nested replace() escapes the LIKE wildcards out of the user's text before it is
