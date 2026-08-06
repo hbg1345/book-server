@@ -27,6 +27,7 @@ public class Payment {
     private String providerTxnId;    // the provider's transaction id (null if it never confirmed)
     private BigDecimal amount;
     private PaymentStatus status;
+    private BigDecimal refundedAmount;  // how much of `amount` has already gone back (0 if none)
     private String idempotencyKey;   // dedup unit: same key => same charge
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

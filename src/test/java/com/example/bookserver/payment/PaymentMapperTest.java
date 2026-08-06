@@ -72,7 +72,7 @@ public class PaymentMapperTest {
 
     private Payment payment(UUID purchaseUuid, String idempotencyKey, PaymentStatus status) {
         return new Payment(Uuids.newId(), purchaseUuid, "TOSS", "txn_123",
-                new BigDecimal("50.00"), status, idempotencyKey, null, null);
+                new BigDecimal("50.00"), status, BigDecimal.ZERO, idempotencyKey, null, null);
     }
 
     // Verifies: a payment inserts and reads back by purchase_uuid; all fields round-trip.

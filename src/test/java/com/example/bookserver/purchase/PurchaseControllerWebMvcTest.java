@@ -29,6 +29,7 @@ import com.example.bookserver.common.GlobalExceptionHandler;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -267,7 +268,7 @@ class PurchaseControllerWebMvcTest {
 
     private static Payment payment(UUID purchase, PaymentStatus status) {
         return new Payment(UUID.randomUUID(), purchase, "STRIPE", "pi_1",
-                new BigDecimal("79.98"), status, "order-" + purchase, null, null);
+                new BigDecimal("79.98"), status, BigDecimal.ZERO, "order-" + purchase, null, null);
     }
 
     // payment-intent: 200 with the client secret; delegates to the service. No request body —
@@ -493,5 +494,65 @@ class PurchaseControllerWebMvcTest {
 
         mockMvc.perform(post("/api/orders/" + purchase + "/cancel").with(asUser(user)))
                 .andExpect(status().isBadGateway());
+    }
+
+    // cancel one line: the path names the item, the body says how many copies.
+    @Test
+    void cancelItem_delegatesToService() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        UUID book = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/items/" + book + "/cancel")
+                        .with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"quantity\":1}"))
+                .andExpect(status().isOk());
+
+        verify(purchaseService).cancelItem(user, purchase, book, 1);
+    }
+
+    // a quantity of zero never reaches the service: bean validation stops it at the edge.
+    @Test
+    void cancelItem_returns400_whenQuantityIsNotPositive() throws Exception {
+        mockMvc.perform(post("/api/orders/" + UUID.randomUUID() + "/items/" + UUID.randomUUID() + "/cancel")
+                        .with(asUser(UUID.randomUUID()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"quantity\":0}"))
+                .andExpect(status().isBadRequest());
+
+        verify(purchaseService, never()).cancelItem(any(), any(), any(), anyInt());
+    }
+
+    // more copies than the order holds -> 400 through the Problem Details handler.
+    @Test
+    void cancelItem_returns400_whenTheLineCannotGiveUpThatMany() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        UUID book = UUID.randomUUID();
+        doThrow(new InvalidCancellationException("too many"))
+                .when(purchaseService).cancelItem(user, purchase, book, 5);
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/items/" + book + "/cancel")
+                        .with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"quantity\":5}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // a book the order never held -> 404.
+    @Test
+    void cancelItem_returns404_whenTheOrderHasNoSuchLine() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID purchase = UUID.randomUUID();
+        UUID book = UUID.randomUUID();
+        doThrow(new OrderItemNotFoundException(purchase, book))
+                .when(purchaseService).cancelItem(user, purchase, book, 1);
+
+        mockMvc.perform(post("/api/orders/" + purchase + "/items/" + book + "/cancel")
+                        .with(asUser(user))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"quantity\":1}"))
+                .andExpect(status().isNotFound());
     }
 }

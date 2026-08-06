@@ -17,7 +17,13 @@ public enum PurchaseState {
     CANCEL_REQUESTED("취소 요청"),
     CANCELLED("취소 완료"),
     REFUND_REQUESTED("환불 요청"),
-    REFUNDED("환불 완료");
+    REFUNDED("환불 완료"),
+
+    /** Some of the order was cancelled before it was paid; the rest is still live. */
+    PARTIALLY_CANCELLED("부분 취소"),
+
+    /** Some of a paid order was cancelled and that part refunded; the rest is still live. */
+    PARTIALLY_REFUNDED("부분 환불");
 
     private final String label;
 
