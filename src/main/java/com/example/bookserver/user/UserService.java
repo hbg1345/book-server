@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import com.example.bookserver.common.Uuids;
@@ -39,7 +40,14 @@ public class UserService {
         user.setPhone(phone);
         user.setBirthDate(birthDate);
         user.setRole(Role.USER);   // self-registration is always a plain user; ADMIN is granted, never requested
-        userMapper.insert(user);
+        try {
+            userMapper.insert(user);
+        } catch (DuplicateKeyException e) {
+            // The check above is a courtesy, not a guarantee: two signups with the same id can
+            // both pass it and only the unique index settles which one wins. Left raw, the loser's
+            // violation escapes unmapped and answers 500 where the contract says 409.
+            throw new DuplicateUserIdException(userId);
+        }
         return userUuid;
     }
 
