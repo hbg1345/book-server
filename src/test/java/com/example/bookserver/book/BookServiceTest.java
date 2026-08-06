@@ -131,4 +131,56 @@ public class BookServiceTest {
         assertThatThrownBy(() -> bookService.delete(Uuids.newId()))
                 .isInstanceOf(BookNotFoundException.class);
     }
+
+    // --- helper: a book that exists only to carry a title ---
+    private void createTitled(String title) {
+        bookService.create(new BookRequest(title, "desc", new BigDecimal("39.99"),
+                LocalDate.of(2021, 1, 1), "Wikibooks", 10, null));
+    }
+
+    // search returns the matching books.
+    @Test
+    void search_returnsMatchingBooks() {
+        createTitled("Clean Code");
+        createTitled("Clean Architecture");
+        createTitled("Refactoring");
+
+        assertThat(bookService.search("clean"))
+                .extracting(Book::getBookTitle)
+                .containsExactlyInAnyOrder("Clean Code", "Clean Architecture");
+    }
+
+    // Surrounding whitespace is the client's, not the user's intent: a query pasted with a
+    // trailing space should find the same books as one typed without it.
+    @Test
+    void search_ignoresSurroundingWhitespace() {
+        createTitled("Clean Code");
+
+        assertThat(bookService.search("  clean  "))
+                .extracting(Book::getBookTitle)
+                .containsExactly("Clean Code");
+    }
+
+    // A blank query matches every title, which is the whole catalogue wearing a search
+    // label. Refuse it rather than let a stray empty input scan 103k rows.
+    @Test
+    void search_rejectsBlankQuery() {
+        createTitled("Clean Code");
+
+        assertThatThrownBy(() -> bookService.search("   "))
+                .isInstanceOf(BlankSearchQueryException.class);
+        assertThatThrownBy(() -> bookService.search(""))
+                .isInstanceOf(BlankSearchQueryException.class);
+    }
+
+    // The service, not the caller, decides how many rows a search may return, so no client
+    // can ask for the whole catalogue by omitting a limit.
+    @Test
+    void search_capsResultsAtTheDefaultLimit() {
+        for (int i = 0; i < BookService.SEARCH_LIMIT + 5; i++) {
+            createTitled("Clean Code volume " + i);
+        }
+
+        assertThat(bookService.search("clean")).hasSize(BookService.SEARCH_LIMIT);
+    }
 }

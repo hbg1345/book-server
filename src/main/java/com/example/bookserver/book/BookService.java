@@ -48,6 +48,26 @@ public class BookService {
         return bookMapper.findAll();
     }
 
+    /**
+     * How many hits a search may return. Fixed here rather than accepted from the caller:
+     * a client-supplied limit is a client-supplied cost, and the predicate scans the whole
+     * catalogue. Paging belongs with the pagination this endpoint does not have yet.
+     */
+    public static final int SEARCH_LIMIT = 50;
+
+    /**
+     * Books whose title contains {@code title}, case-insensitively, newest first
+     * (bodies only, authors not fetched — same shape as {@link #list()}).
+     *
+     * @throws BlankSearchQueryException if the query is empty or only whitespace
+     */
+    public List<Book> search(String title) {
+        if (title == null || title.isBlank()) {
+            throw new BlankSearchQueryException();
+        }
+        return bookMapper.searchByTitle(title.trim(), SEARCH_LIMIT);
+    }
+
     /** Update every mutable field and replace the author links. */
     @Transactional
     public void update(UUID bookUuid, BookRequest req) {
