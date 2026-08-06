@@ -153,7 +153,7 @@ public class PurchaseService {
      */
     @Transactional
     public OpenedPayment openPaymentIntent(UUID userUuid, UUID purchaseUuid) {
-        PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
+        PurchaseCurrent current = requireOwnOrderForUpdate(userUuid, purchaseUuid);
         requireState(current, PurchaseState.PAYMENT_PENDING);
 
         String idempotencyKey = intentKey(purchaseUuid);
@@ -208,7 +208,7 @@ public class PurchaseService {
         }
         paymentMapper.updateStatus(payment.getPaymentUuid(), PaymentStatus.PAID);
 
-        PurchaseCurrent current = currentMapper.findByPurchaseUuid(payment.getPurchaseUuid());
+        PurchaseCurrent current = currentMapper.findByPurchaseUuidForUpdate(payment.getPurchaseUuid());
         if (current != null && current.getPurchaseState() == PurchaseState.PAYMENT_PENDING) {
             transition(current, PurchaseState.ORDERED);
         }
@@ -284,7 +284,7 @@ public class PurchaseService {
     /** Seller/admin: {@code ORDERED -> PREPARING}. Not owner-scoped — admin acts on any order. */
     @Transactional
     public void prepare(UUID purchaseUuid) {
-        PurchaseCurrent current = requireOrder(purchaseUuid);
+        PurchaseCurrent current = requireOrderForUpdate(purchaseUuid);
         requireState(current, PurchaseState.ORDERED);
         transition(current, PurchaseState.PREPARING);
     }
@@ -292,7 +292,7 @@ public class PurchaseService {
     /** Seller/admin: {@code PREPARING -> SHIPPING}, capturing the shipment tracking number. */
     @Transactional
     public void ship(UUID purchaseUuid, String trackingNumber) {
-        PurchaseCurrent current = requireOrder(purchaseUuid);
+        PurchaseCurrent current = requireOrderForUpdate(purchaseUuid);
         requireState(current, PurchaseState.PREPARING);
         transition(current, PurchaseState.SHIPPING);
         currentMapper.updateTrackingNumber(purchaseUuid, trackingNumber);
@@ -301,7 +301,7 @@ public class PurchaseService {
     /** Seller/admin: {@code SHIPPING -> DELIVERED}. */
     @Transactional
     public void deliver(UUID purchaseUuid) {
-        PurchaseCurrent current = requireOrder(purchaseUuid);
+        PurchaseCurrent current = requireOrderForUpdate(purchaseUuid);
         requireState(current, PurchaseState.SHIPPING);
         transition(current, PurchaseState.DELIVERED);
     }
@@ -309,7 +309,7 @@ public class PurchaseService {
     /** Buyer: {@code DELIVERED -> CONFIRMED} (purchase confirmed). Owner-scoped. */
     @Transactional
     public void confirm(UUID userUuid, UUID purchaseUuid) {
-        PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
+        PurchaseCurrent current = requireOwnOrderForUpdate(userUuid, purchaseUuid);
         requireState(current, PurchaseState.DELIVERED);
         transition(current, PurchaseState.CONFIRMED);
     }
@@ -321,7 +321,7 @@ public class PurchaseService {
      */
     @Transactional
     public void cancel(UUID userUuid, UUID purchaseUuid) {
-        PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
+        PurchaseCurrent current = requireOwnOrderForUpdate(userUuid, purchaseUuid);
         if (!CANCELLABLE.contains(current.getPurchaseState())) {
             throw new IllegalOrderStateException("Order can no longer be cancelled: " + current.getPurchaseState());
         }
@@ -335,7 +335,7 @@ public class PurchaseService {
     /** Buyer returns a delivered order for a refund: {@code DELIVERED/CONFIRMED -> REFUNDED}. Owner-scoped. */
     @Transactional
     public void returnOrder(UUID userUuid, UUID purchaseUuid) {
-        PurchaseCurrent current = requireOwnOrder(userUuid, purchaseUuid);
+        PurchaseCurrent current = requireOwnOrderForUpdate(userUuid, purchaseUuid);
         if (!RETURNABLE.contains(current.getPurchaseState())) {
             throw new IllegalOrderStateException("Order cannot be returned: " + current.getPurchaseState());
         }
@@ -355,7 +355,7 @@ public class PurchaseService {
      */
     @Transactional
     public void expireUnpaidOrder(UUID purchaseUuid) {
-        PurchaseCurrent current = currentMapper.findByPurchaseUuid(purchaseUuid);
+        PurchaseCurrent current = currentMapper.findByPurchaseUuidForUpdate(purchaseUuid);
         if (current == null || current.getPurchaseState() != PurchaseState.PAYMENT_PENDING) {
             return;
         }
@@ -419,7 +419,20 @@ public class PurchaseService {
     }
 
     private PurchaseCurrent requireOwnOrder(UUID userUuid, UUID purchaseUuid) {
-        PurchaseCurrent current = currentMapper.findByPurchaseUuid(purchaseUuid);
+        return ownOrder(currentMapper.findByPurchaseUuid(purchaseUuid), userUuid, purchaseUuid);
+    }
+
+    /**
+     * As {@link #requireOwnOrder}, but locks the order row for the rest of the transaction.
+     * Every caller that goes on to change the order's state uses this one: the state check
+     * that follows is made in Java, so without the lock a concurrent transaction can pass the
+     * same check and apply the same transition twice.
+     */
+    private PurchaseCurrent requireOwnOrderForUpdate(UUID userUuid, UUID purchaseUuid) {
+        return ownOrder(currentMapper.findByPurchaseUuidForUpdate(purchaseUuid), userUuid, purchaseUuid);
+    }
+
+    private PurchaseCurrent ownOrder(PurchaseCurrent current, UUID userUuid, UUID purchaseUuid) {
         if (current == null || !current.getUserUuid().equals(userUuid)) {
             throw new OrderNotFoundException(purchaseUuid);   // don't reveal others' orders
         }
@@ -428,7 +441,15 @@ public class PurchaseService {
 
     /** Look up an order by id with no ownership check — for admin/seller fulfillment actions. */
     private PurchaseCurrent requireOrder(UUID purchaseUuid) {
-        PurchaseCurrent current = currentMapper.findByPurchaseUuid(purchaseUuid);
+        return existingOrder(currentMapper.findByPurchaseUuid(purchaseUuid), purchaseUuid);
+    }
+
+    /** As {@link #requireOrder}, locked for a caller that is about to change the state. */
+    private PurchaseCurrent requireOrderForUpdate(UUID purchaseUuid) {
+        return existingOrder(currentMapper.findByPurchaseUuidForUpdate(purchaseUuid), purchaseUuid);
+    }
+
+    private PurchaseCurrent existingOrder(PurchaseCurrent current, UUID purchaseUuid) {
         if (current == null) {
             throw new OrderNotFoundException(purchaseUuid);
         }
