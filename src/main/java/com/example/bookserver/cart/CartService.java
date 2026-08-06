@@ -40,6 +40,15 @@ public class CartService {
         return cartItemMapper.findByUserWithBook(userUuid);
     }
 
+    /**
+     * The cart, claimed for the caller's transaction — for checkout, which turns these lines into
+     * an order and then deletes them. A second submission waits here and finds the cart already
+     * emptied rather than ordering the same items again. Plain reads keep {@link #listMyCart}.
+     */
+    public List<CartItemView> listMyCartForUpdate(UUID userUuid) {
+        return cartItemMapper.findByUserWithBookForUpdate(userUuid);
+    }
+
     /** Set the quantity of a book already in the cart. */
     @Transactional
     public void changeQuantity(UUID userUuid, UUID bookUuid, int quantity) {

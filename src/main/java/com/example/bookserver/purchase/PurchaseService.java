@@ -98,7 +98,10 @@ public class PurchaseService {
         // bad or not-owned address fails fast rather than reserving inventory then rolling back.
         OrderAddress delivery = resolveDeliveryAddress(purchaseUuid, userUuid, req);
 
-        List<CartItemView> cart = cartService.listMyCart(userUuid);
+        // Claim the cart lines: a second submission of the same checkout blocks here and finds
+        // them gone, rather than turning one cart into two orders (there is no order row to
+        // contend on — each call mints its own purchase_uuid).
+        List<CartItemView> cart = cartService.listMyCartForUpdate(userUuid);
         if (cart.isEmpty()) {
             throw new EmptyCartException();
         }
