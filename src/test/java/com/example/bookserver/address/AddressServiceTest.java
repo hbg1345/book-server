@@ -56,6 +56,12 @@ public class AddressServiceTest {
                 "서울특별시 강남구 테헤란로 1", "101동 1001호", postalCode, isDefault);
     }
 
+    /** Same address as createReq("Home", "KR", "06234", false) but with no unit number. */
+    private CreateAddressRequest noDetailReq() {
+        return new CreateAddressRequest("Home", "Jane Doe", "010-1234-5678", "KR",
+                "서울특별시 강남구 테헤란로 1", null, "06234", false);
+    }
+
     private UpdateAddressRequest updateReq(String alias, String country, String postalCode, boolean isDefault) {
         return new UpdateAddressRequest(alias, "Jane Doe", "010-1234-5678", country,
                 "서울특별시 강남구 테헤란로 2", "202동 2002호", postalCode, isDefault);
@@ -90,6 +96,79 @@ public class AddressServiceTest {
                 .filteredOn(Address::isDefaultAddress)
                 .extracting(Address::getAlias)
                 .containsExactly("Work");
+    }
+
+    // the same address saved twice -> 409-style error rather than a second copy of it.
+    // (Only the throw is asserted: the unique violation aborts the surrounding transaction,
+    // so any query after it would fail on the aborted transaction rather than on the data.)
+    @Test
+    void addAddress_sameAddressTwice_throwsDuplicate() {
+        UUID user = persistUser();
+        addressService.addAddress(user, createReq("Home", "KR", "06234", false));
+
+        assertThatThrownBy(() -> addressService.addAddress(user, createReq("Home", "KR", "06234", false)))
+                .isInstanceOf(DuplicateAddressException.class);
+    }
+
+    // the same address under a different label is still the same address.
+    @Test
+    void addAddress_sameAddressDifferentAlias_throwsDuplicate() {
+        UUID user = persistUser();
+        addressService.addAddress(user, createReq("Home", "KR", "06234", false));
+
+        assertThatThrownBy(() -> addressService.addAddress(user, createReq("집", "KR", "06234", false)))
+                .isInstanceOf(DuplicateAddressException.class);
+    }
+
+    // detail_address is nullable, and a unique index counts two NULLs as distinct — so without
+    // the COALESCE in the index, addresses with no unit number would slip past the constraint.
+    @Test
+    void addAddress_sameAddressWithoutDetail_throwsDuplicate() {
+        UUID user = persistUser();
+        addressService.addAddress(user, noDetailReq());
+
+        assertThatThrownBy(() -> addressService.addAddress(user, noDetailReq()))
+                .isInstanceOf(DuplicateAddressException.class);
+    }
+
+    // the same street address sent to someone else is a separate entry, not a duplicate.
+    @Test
+    void addAddress_sameAddressDifferentRecipient_isSaved() {
+        UUID user = persistUser();
+        addressService.addAddress(user, createReq("Home", "KR", "06234", false));
+
+        UUID gift = addressService.addAddress(user, new CreateAddressRequest("Gift", "John Roe",
+                "010-9999-8888", "KR", "서울특별시 강남구 테헤란로 1", "101동 1001호", "06234", false));
+
+        assertThat(addressMapper.findById(gift)).isNotNull();
+        assertThat(addressMapper.findByUser(user)).hasSize(2);
+    }
+
+    // one user's address does not block another user's identical one.
+    @Test
+    void addAddress_sameAddressAnotherUser_isSaved() {
+        UUID me = persistUser();
+        UUID other = persistUser();
+        addressService.addAddress(me, createReq("Home", "KR", "06234", false));
+
+        UUID theirs = addressService.addAddress(other, createReq("Home", "KR", "06234", false));
+
+        assertThat(addressMapper.findById(theirs)).isNotNull();
+    }
+
+    // editing one saved address into a copy of another is the same duplicate, reached from the
+    // other direction.
+    @Test
+    void updateAddress_intoAnExistingAddress_throwsDuplicate() {
+        UUID user = persistUser();
+        addressService.addAddress(user, createReq("Home", "KR", "06234", false));
+        UUID work = addressService.addAddress(user, new CreateAddressRequest("Work", "Jane Doe",
+                "010-1234-5678", "KR", "서울특별시 중구 세종대로 100", "5층", "04524", false));
+
+        assertThatThrownBy(() -> addressService.updateAddress(user, work,
+                new UpdateAddressRequest("Work", "Jane Doe", "010-1234-5678", "KR",
+                        "서울특별시 강남구 테헤란로 1", "101동 1001호", "06234", false)))
+                .isInstanceOf(DuplicateAddressException.class);
     }
 
     // add with a KR postal code that is not 5 digits -> 400-style error, nothing saved.

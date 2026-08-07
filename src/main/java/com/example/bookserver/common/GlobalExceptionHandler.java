@@ -15,6 +15,7 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import com.example.bookserver.address.AddressNotFoundException;
+import com.example.bookserver.address.DuplicateAddressException;
 import com.example.bookserver.address.InvalidPostalCodeException;
 import com.example.bookserver.auth.InvalidRefreshTokenException;
 import com.example.bookserver.book.BlankSearchQueryException;
@@ -83,6 +84,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(AddressNotFoundException.class)
     public ProblemDetail handleAddressNotFound(AddressNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Saving an address the user's book already holds — a double-clicked form, typically. */
+    @ExceptionHandler(DuplicateAddressException.class)
+    public ProblemDetail handleDuplicateAddress(DuplicateAddressException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     /** A postal code that does not match its country's expected format. */
