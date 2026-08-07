@@ -17,8 +17,10 @@ import com.example.bookserver.common.Uuids;
  * <p>Postal codes are format-validated per country (the schema is international, so a US
  * ZIP and a KR postal code are both valid rows; only their formats differ). Countries
  * without a rule configured are accepted as-is. At most one default address is kept per
- * user: setting a new default clears the old one first, within one transaction, so the
- * partial unique index (uq_address_one_default) is never violated.
+ * user: setting a new default takes the user's row (lockUserForDefaultChange) and then clears
+ * the old default, within one transaction, so the partial unique index (uq_address_one_default)
+ * is never violated. The lock is what makes the clear reliable — without it two callers can
+ * each clear a default the other is about to insert, and both then claim it.
  *
  * <p>A saved address may not be saved twice. The rule lives in the database
  * (uq_address_no_duplicate_per_user) rather than in a read-then-write check here, because a
@@ -47,6 +49,7 @@ public class AddressService {
                 req.defaultAddress(), null);
 
         if (req.defaultAddress()) {
+            addressMapper.lockUserForDefaultChange(userUuid);
             addressMapper.clearDefaultForUser(userUuid);
         }
         try {
@@ -73,6 +76,7 @@ public class AddressService {
                 req.defaultAddress(), null);
 
         if (req.defaultAddress()) {
+            addressMapper.lockUserForDefaultChange(userUuid);
             addressMapper.clearDefaultForUser(userUuid);
         }
         int updated;
