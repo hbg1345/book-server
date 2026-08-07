@@ -37,6 +37,12 @@ import java.time.Duration;
  *
  * <p>Admin credentials are required, not optional: without them there is nothing to contend
  * with and the profile is just {@link CheckoutSimulation} on one title.
+ *
+ * <p><strong>Keep the run under {@code order.payment-timeout} (PT30M).</strong> Orders here stay
+ * in PAYMENT_PENDING holding their reservations; once the expiry sweep starts cancelling them it
+ * puts the stock back, and the equation below no longer balances — through the sweeper working
+ * correctly, not through a lost write. The 300-second default is well inside that; anything past
+ * thirty minutes needs the expired orders counted too.
  */
 public class StockContentionSimulation extends Simulation {
 

@@ -26,6 +26,13 @@ import io.gatling.javaapi.core.Simulation;
  * <p>Deliberately takes no admin credentials and tops nothing up: the shelf running out is the
  * point, not an accident to be engineered around. {@code -PthinkTime=0} is implied — a pause
  * would let the queue drain between arrivals, which is the one thing a flash sale does not do.
+ *
+ * <p><strong>The reconciliation is only valid for runs shorter than
+ * {@code order.payment-timeout} (PT30M).</strong> Orders placed here sit in PAYMENT_PENDING
+ * holding their reservations; past that window the expiry sweep cancels them and gives the stock
+ * back, and the arithmetic below then reports a shortfall that is the sweeper doing its job
+ * rather than a defect. This profile fires everyone at once and is over in seconds, so it is
+ * well inside the window — but a run stretched past thirty minutes is measuring something else.
  */
 public class FlashSaleSimulation extends Simulation {
 
