@@ -43,6 +43,15 @@ public class AddressMapperTest {
     }
 
     private Address newAddress(UUID userUuid, String alias, boolean isDefault) {
+        return newAddress(userUuid, alias, "서울특별시 강남구 테헤란로 1", isDefault);
+    }
+
+    /**
+     * A distinct road makes a distinct address. uq_address_no_duplicate_per_user keys on the
+     * address itself and not on the alias, so two rows that differ only by their label are a
+     * duplicate — any test wanting two addresses has to give them two roads.
+     */
+    private Address newAddress(UUID userUuid, String alias, String roadAddress, boolean isDefault) {
         Address a = new Address();
         a.setAddressUuid(Uuids.newId());
         a.setUserUuid(userUuid);
@@ -50,7 +59,7 @@ public class AddressMapperTest {
         a.setRecipient("Jane Doe");
         a.setPhone("010-1234-5678");
         a.setCountry("KR");
-        a.setRoadAddress("서울특별시 강남구 테헤란로 1");
+        a.setRoadAddress(roadAddress);
         a.setDetailAddress("101동 1001호");
         a.setPostalCode("06234");
         a.setDefaultAddress(isDefault);
@@ -99,7 +108,7 @@ public class AddressMapperTest {
     @Test
     void findByUser_returnsAll_defaultFirst() {
         UUID userUuid = persistUser();
-        addressMapper.insert(newAddress(userUuid, "Work", false));
+        addressMapper.insert(newAddress(userUuid, "Work", "서울특별시 중구 세종대로 100", false));
         addressMapper.insert(newAddress(userUuid, "Home", true));
 
         assertThat(addressMapper.findByUser(userUuid))
@@ -155,12 +164,41 @@ public class AddressMapperTest {
 
     // Verifies: the DB enforces at most one default address per user — a second
     // default insert for the same user hits the partial unique index.
+    // The two addresses must be genuinely different, or this would pass on
+    // uq_address_no_duplicate_per_user instead and stop testing what it names.
     @Test
     void secondDefault_forSameUser_isRejected() {
         UUID userUuid = persistUser();
         addressMapper.insert(newAddress(userUuid, "Home", true));
 
-        assertThatThrownBy(() -> addressMapper.insert(newAddress(userUuid, "Work", true)))
+        assertThatThrownBy(() ->
+                addressMapper.insert(newAddress(userUuid, "Work", "서울특별시 중구 세종대로 100", true)))
                 .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    // Verifies: the DB enforces one saved address per user — the same address inserted twice
+    // hits uq_address_no_duplicate_per_user, whatever it is labelled. This is the constraint
+    // that gives two simultaneous creates something to collide on (#61).
+    @Test
+    void sameAddressTwice_forSameUser_isRejected() {
+        UUID userUuid = persistUser();
+        addressMapper.insert(newAddress(userUuid, "Home", false));
+
+        assertThatThrownBy(() -> addressMapper.insert(newAddress(userUuid, "집", false)))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    // Verifies: the constraint is per user, so it never blocks one user because another
+    // happens to live at the same place (flatmates, an office, a family home).
+    @Test
+    void sameAddress_forAnotherUser_isAccepted() {
+        UUID me = persistUser();
+        UUID other = persistUser();
+        addressMapper.insert(newAddress(me, "Home", false));
+
+        Address theirs = newAddress(other, "Home", false);
+        addressMapper.insert(theirs);
+
+        assertThat(addressMapper.findById(theirs.getAddressUuid())).isNotNull();
     }
 }

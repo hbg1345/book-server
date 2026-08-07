@@ -3,6 +3,7 @@ package com.example.bookserver.address;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +19,12 @@ import com.example.bookserver.common.Uuids;
  * without a rule configured are accepted as-is. At most one default address is kept per
  * user: setting a new default clears the old one first, within one transaction, so the
  * partial unique index (uq_address_one_default) is never violated.
+ *
+ * <p>A saved address may not be saved twice. The rule lives in the database
+ * (uq_address_no_duplicate_per_user) rather than in a read-then-write check here, because a
+ * check has nothing to stop two simultaneous submissions both passing it; the write is where
+ * they meet. The rejection is translated to {@link DuplicateAddressException} so callers get
+ * a 409 rather than the raw driver error. See #61.
  */
 @Service
 public class AddressService {
@@ -42,7 +49,11 @@ public class AddressService {
         if (req.defaultAddress()) {
             addressMapper.clearDefaultForUser(userUuid);
         }
-        addressMapper.insert(a);
+        try {
+            addressMapper.insert(a);
+        } catch (DuplicateKeyException e) {
+            throw new DuplicateAddressException();
+        }
         return addressUuid;
     }
 
@@ -64,7 +75,15 @@ public class AddressService {
         if (req.defaultAddress()) {
             addressMapper.clearDefaultForUser(userUuid);
         }
-        if (addressMapper.update(a) == 0) {
+        int updated;
+        try {
+            updated = addressMapper.update(a);
+        } catch (DuplicateKeyException e) {
+            // editing one saved address into a copy of another is the same duplicate, reached
+            // from the other direction
+            throw new DuplicateAddressException();
+        }
+        if (updated == 0) {
             throw new AddressNotFoundException(addressUuid);   // rolls back the clear above
         }
     }
