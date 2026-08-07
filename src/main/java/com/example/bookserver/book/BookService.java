@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.example.bookserver.book.dto.BookRequest;
+import com.example.bookserver.book.dto.UpdateBookRequest;
 import com.example.bookserver.common.Uuids;
 
 @Service
@@ -101,15 +102,43 @@ public class BookService {
         return bookMapper.searchByTitle(title.trim(), SEARCH_LIMIT);
     }
 
-    /** Update every mutable field and replace the author links. */
+    /**
+     * Update the catalogue entry and replace the author links. Stock is not part of it — see
+     * {@link #adjustStock} — so an edit can no longer put back copies sold while it was open.
+     */
     @Transactional
-    public void update(UUID bookUuid, BookRequest req) {
+    public void update(UUID bookUuid, UpdateBookRequest req) {
         requireBook(bookUuid);
         Book book = new Book(bookUuid, req.bookTitle(), req.bookDescription(),
-                req.price(), req.publishDate(), req.publisher(), req.inventory(), null);
+                req.price(), req.publishDate(), req.publisher(), null, null);
         bookMapper.update(book);
         bookMapper.unlinkAuthors(bookUuid);
         linkAuthors(bookUuid, req.authorUuids());
+    }
+
+    /**
+     * Move a book's stock by {@code delta} and return what it holds afterwards.
+     *
+     * <p>A change rather than a total, so nothing has to be read first and nothing can be
+     * written back stale. The floor is enforced by the same statement that applies the change,
+     * which is what stops a write-off and a sale from both passing a check that only one of
+     * them can still satisfy.
+     *
+     * <p>What a delta gives up is idempotency: sending "+20" twice receives forty copies. There
+     * is nothing here that recognises the second request as a repeat of the first, so a
+     * double-clicked button or a retried request applies twice. Guarding that needs an identity
+     * for the movement, which nothing in a bare {@code {"delta": 20}} supplies — the frontend
+     * is what stops the repeat reaching us.
+     *
+     * @throws InsufficientStockException if the change would leave fewer than zero copies
+     */
+    @Transactional
+    public int adjustStock(UUID bookUuid, int delta) {
+        requireBook(bookUuid);
+        if (bookMapper.adjustInventory(bookUuid, delta) == 0) {
+            throw new InsufficientStockException(bookUuid, delta);
+        }
+        return bookMapper.findById(bookUuid).getInventory();
     }
 
     /** Delete a book (its author links and cart/history rows cascade via their FKs). */

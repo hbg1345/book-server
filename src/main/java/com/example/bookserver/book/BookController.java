@@ -15,10 +15,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.bookserver.book.dto.AdjustStockRequest;
 import com.example.bookserver.book.dto.BookPageResponse;
 import com.example.bookserver.book.dto.BookRequest;
 import com.example.bookserver.book.dto.BookResponse;
 import com.example.bookserver.book.dto.CreateBookResponse;
+import com.example.bookserver.book.dto.StockResponse;
+import com.example.bookserver.book.dto.UpdateBookRequest;
 
 import jakarta.validation.Valid;
 
@@ -69,8 +72,29 @@ public class BookController {
     }
 
     @PutMapping("/{bookUuid}")
-    public void update(@PathVariable UUID bookUuid, @Valid @RequestBody BookRequest req) {
+    public void update(@PathVariable UUID bookUuid, @Valid @RequestBody UpdateBookRequest req) {
         bookService.update(bookUuid, req);
+    }
+
+    /**
+     * Move stock: {@code {"delta": 20}} receives copies, {@code {"delta": -2}} writes them off.
+     *
+     * <p>Separate from the update above because it is a separate act. Editing the catalogue and
+     * changing what the shop holds are done by different people for different reasons, and
+     * bundling them meant an editor could not touch one without restating the other from a
+     * figure that had since moved on.
+     *
+     * <p>A delta and not a total, so the caller never needs to know the current count — the one
+     * thing it cannot know reliably while the book is selling.
+     *
+     * <p>Not idempotent: two identical requests move the stock twice, because nothing in them
+     * says whether that is a repeat or a second genuine receipt. The frontend must not send the
+     * second one.
+     */
+    @PostMapping("/{bookUuid}/stock")
+    public StockResponse adjustStock(@PathVariable UUID bookUuid,
+                                     @Valid @RequestBody AdjustStockRequest req) {
+        return new StockResponse(bookService.adjustStock(bookUuid, req.delta()));
     }
 
     @DeleteMapping("/{bookUuid}")

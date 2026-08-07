@@ -129,14 +129,26 @@ public interface BookMapper {
             """)
     void incrementInventory(@Param("bookUuid") UUID bookUuid, @Param("quantity") int quantity);
 
+    // Move stock by a delta, refusing to go below zero. Relative and conditional for the same
+    // reason decrementInventory is: a total read a moment ago is a total that may already be
+    // wrong, and writing it back would erase whatever happened in between.
+    // Returns rows updated (1 = applied, 0 = would go negative).
+    @Update("""
+            UPDATE book SET inventory = inventory + #{delta}
+            WHERE book_uuid = #{bookUuid} AND inventory + #{delta} >= 0
+            """)
+    int adjustInventory(@Param("bookUuid") UUID bookUuid, @Param("delta") int delta);
+
+    // The catalogue entry only. inventory is not listed here on purpose: it is not the editor's
+    // to restate, and every column named in a SET is a column this statement will overwrite
+    // with whatever the caller last read.
     @Update("""
             UPDATE book SET
                 book_title = #{bookTitle},
                 book_description = #{bookDescription},
                 price = #{price},
                 publish_date = #{publishDate},
-                publisher = #{publisher},
-                inventory = #{inventory}
+                publisher = #{publisher}
             WHERE book_uuid = #{bookUuid}
             """)
     void update(Book book);
