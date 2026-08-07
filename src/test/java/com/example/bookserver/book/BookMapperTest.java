@@ -82,6 +82,26 @@ public class BookMapperTest {
         assertThat(bookMapper.findById(bookId).getInventory()).isEqualTo(13);
     }
 
+    // Verifies: adjustInventory moves stock in either direction and refuses to go
+    // below zero (returns 0, leaves inventory untouched). Relative and conditional
+    // like decrementInventory, so an admin's adjustment cannot erase a concurrent sale.
+    @Test
+    void adjustInventory_movesEitherWay_andRefusesToGoNegative() {
+        UUID bookId = Uuids.newId();
+        bookMapper.insert(sampleBook(bookId));   // inventory 10
+
+        assertThat(bookMapper.adjustInventory(bookId, 20)).isEqualTo(1);    // received
+        assertThat(bookMapper.findById(bookId).getInventory()).isEqualTo(30);
+
+        assertThat(bookMapper.adjustInventory(bookId, -2)).isEqualTo(1);    // written off
+        assertThat(bookMapper.findById(bookId).getInventory()).isEqualTo(28);
+
+        // emptying the shelf exactly is fine; one copy further is not
+        assertThat(bookMapper.adjustInventory(bookId, -28)).isEqualTo(1);
+        assertThat(bookMapper.adjustInventory(bookId, -1)).isZero();
+        assertThat(bookMapper.findById(bookId).getInventory()).isZero();
+    }
+
     // 2. the M:N relation on its own
     // Verifies: after linking authors to a book, findAuthorsByBookId returns
     // exactly those authors (the join table + join query work).
@@ -165,8 +185,9 @@ public class BookMapperTest {
     }
 
     // 4. update
-    // Verifies: update writes every mutable column correctly — each field is
-    // changed to a distinct value so a broken SET mapping cannot slip through.
+    // Verifies: update writes every catalogue column correctly — each field is
+    // changed to a distinct value so a broken SET mapping cannot slip through —
+    // and leaves inventory alone even when the Book handed to it carries one.
     @Test
     void update() {
         UUID bookId = Uuids.newId();
@@ -180,7 +201,7 @@ public class BookMapperTest {
         changed.setPrice(new BigDecimal("49.99"));
         changed.setPublishDate(LocalDate.of(2008, 8, 1));
         changed.setPublisher("Prentice Hall");
-        changed.setInventory(5);
+        changed.setInventory(5);      // ignored: not a column this statement writes
         bookMapper.update(changed);
 
         Book found = bookMapper.findById(bookId);
@@ -189,7 +210,9 @@ public class BookMapperTest {
         assertThat(found.getPrice()).isEqualByComparingTo("49.99");
         assertThat(found.getPublishDate()).isEqualTo(LocalDate.of(2008, 8, 1));
         assertThat(found.getPublisher()).isEqualTo("Prentice Hall");
-        assertThat(found.getInventory()).isEqualTo(5);
+        assertThat(found.getInventory())
+                .as("stock is not the editor's to restate; only adjustInventory moves it")
+                .isEqualTo(10);
     }
 
     // 5. delete
