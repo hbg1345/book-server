@@ -1,5 +1,6 @@
 package com.example.bookserver.purchase;
 
+import com.example.bookserver.Isbns;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -123,6 +124,7 @@ class PurchaseConcurrencyTest {
         UUID bookUuid = Uuids.newId();
         Book book = new Book();
         book.setBookUuid(bookUuid);
+        book.setIsbn(Isbns.next());
         book.setBookTitle("Clean Code");
         book.setBookDescription("desc");
         book.setPrice(new BigDecimal("10.00"));

@@ -1,5 +1,6 @@
 package com.example.bookserver.cart;
 
+import com.example.bookserver.Isbns;
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.book.Book;
 import com.example.bookserver.book.BookMapper;
@@ -49,6 +50,7 @@ public class CartItemMapperTest {
         UUID bookUuid = Uuids.newId();
         Book book = new Book();
         book.setBookUuid(bookUuid);
+        book.setIsbn(Isbns.next());
         book.setBookTitle("Clean Architecture");
         book.setBookDescription("desc");
         book.setPrice(new BigDecimal("39.99"));

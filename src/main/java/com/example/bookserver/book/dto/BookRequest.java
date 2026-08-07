@@ -13,10 +13,17 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 /**
- * Body for creating (POST /api/books) and updating (PUT /api/books/{uuid}) a book.
- * {@code authorUuids} is optional and references authors that must already exist.
+ * Body for creating a book (POST /api/books). {@code authorUuids} is optional and references
+ * authors that must already exist.
+ *
+ * <p>{@code isbn} is the book's identity in the outside world, and the reason this endpoint can
+ * refuse a duplicate: every call mints a fresh book_uuid, so without it a double-submitted form
+ * left two identical books in the catalogue, each with its own stock. Editing does not carry it
+ * — see {@link UpdateBookRequest} — because changing a book's ISBN does not correct the entry,
+ * it names a different book.
  */
 public record BookRequest(
+        @NotBlank @Isbn13 String isbn,
         @NotBlank @Size(max = 255) String bookTitle,
         @Size(max = 10_000) String bookDescription,
         @NotNull @DecimalMin(value = "0.0", inclusive = false) @Digits(integer = 8, fraction = 2) BigDecimal price,

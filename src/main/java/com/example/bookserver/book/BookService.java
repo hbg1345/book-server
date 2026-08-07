@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,13 +25,24 @@ public class BookService {
     /**
      * Create a book and link the given (already-existing) authors. Returns the
      * generated book_uuid. Insert + author links are one transaction.
+     *
+     * <p>The ISBN is what makes a resubmitted form a 409 rather than a second copy of the same
+     * book. The duplicate is caught from the unique index rather than by looking first: a check
+     * and an insert in separate statements leave a window for two concurrent calls to both pass
+     * the check, and the index does not have that window.
+     *
+     * @throws DuplicateIsbnException if the catalogue already holds this ISBN
      */
     @Transactional
     public UUID create(BookRequest req) {
         UUID bookUuid = Uuids.newId();
-        Book book = new Book(bookUuid, req.bookTitle(), req.bookDescription(),
+        Book book = new Book(bookUuid, req.isbn(), req.bookTitle(), req.bookDescription(),
                 req.price(), req.publishDate(), req.publisher(), req.inventory(), null);
-        bookMapper.insert(book);
+        try {
+            bookMapper.insert(book);
+        } catch (DuplicateKeyException e) {
+            throw new DuplicateIsbnException(req.isbn());
+        }
         linkAuthors(bookUuid, req.authorUuids());
         return bookUuid;
     }
@@ -109,7 +121,8 @@ public class BookService {
     @Transactional
     public void update(UUID bookUuid, UpdateBookRequest req) {
         requireBook(bookUuid);
-        Book book = new Book(bookUuid, req.bookTitle(), req.bookDescription(),
+        // isbn and inventory are both null on purpose: neither is a column this update writes.
+        Book book = new Book(bookUuid, null, req.bookTitle(), req.bookDescription(),
                 req.price(), req.publishDate(), req.publisher(), null, null);
         bookMapper.update(book);
         bookMapper.unlinkAuthors(bookUuid);
