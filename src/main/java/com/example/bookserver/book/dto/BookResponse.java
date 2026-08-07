@@ -13,6 +13,7 @@ import com.example.bookserver.book.Book;
  */
 public record BookResponse(
         UUID bookUuid,
+        String isbn,
         String bookTitle,
         String bookDescription,
         BigDecimal price,
@@ -27,6 +28,7 @@ public record BookResponse(
                 : book.getAuthors().stream().map(AuthorResponse::from).toList();
         return new BookResponse(
                 book.getBookUuid(),
+                book.getIsbn(),
                 book.getBookTitle(),
                 book.getBookDescription(),
                 book.getPrice(),

@@ -1,5 +1,6 @@
 package com.example.bookserver.book;
 
+import com.example.bookserver.Isbns;
 import java.time.LocalDate;
 
 import org.junit.jupiter.api.Test;
@@ -75,10 +76,10 @@ class AuthorControllerIntegrationTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"bookTitle":"Clean Architecture","bookDescription":"desc",
+                                {"isbn":"%s","bookTitle":"Clean Architecture","bookDescription":"desc",
                                  "price":39.99,"publishDate":"2021-01-01","publisher":"Wikibooks","inventory":10,
                                  "authorUuids":["%s"]}
-                                """.formatted(authorUuid)))
+                                """.formatted(Isbns.next(), authorUuid)))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(get("/api/authors").param("name", "Robert Martin"))

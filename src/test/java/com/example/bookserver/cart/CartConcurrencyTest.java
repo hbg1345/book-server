@@ -1,5 +1,6 @@
 package com.example.bookserver.cart;
 
+import com.example.bookserver.Isbns;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
@@ -60,6 +61,7 @@ class CartConcurrencyTest {
         UUID bookUuid = Uuids.newId();
         Book book = new Book();
         book.setBookUuid(bookUuid);
+        book.setIsbn(Isbns.next());
         book.setBookTitle("Clean Code");
         book.setBookDescription("desc");
         book.setPrice(new BigDecimal("10.00"));

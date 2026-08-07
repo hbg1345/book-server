@@ -18,9 +18,9 @@ public interface BookMapper {
 
     @Insert("""
             INSERT INTO book
-                (book_uuid, book_title, book_description, price, publish_date, publisher, inventory)
+                (book_uuid, isbn, book_title, book_description, price, publish_date, publisher, inventory)
             VALUES
-                (#{bookUuid}, #{bookTitle}, #{bookDescription}, #{price}, #{publishDate}, #{publisher}, #{inventory})
+                (#{bookUuid}, #{isbn}, #{bookTitle}, #{bookDescription}, #{price}, #{publishDate}, #{publisher}, #{inventory})
             """)
     void insert(Book book);
 

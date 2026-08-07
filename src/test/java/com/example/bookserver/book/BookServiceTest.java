@@ -1,5 +1,6 @@
 package com.example.bookserver.book;
 
+import com.example.bookserver.Isbns;
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.book.dto.BookRequest;
 import com.example.bookserver.book.dto.UpdateBookRequest;
@@ -38,7 +39,12 @@ public class BookServiceTest {
     }
 
     private BookRequest sampleRequest(List<UUID> authorUuids) {
-        return new BookRequest("Clean Architecture", "A book about software architecture",
+        return sampleRequest(authorUuids, Isbns.next());
+    }
+
+    /** The same book under a stated ISBN, for the tests that care which one it is. */
+    private BookRequest sampleRequest(List<UUID> authorUuids, String isbn) {
+        return new BookRequest(isbn, "Clean Architecture", "A book about software architecture",
                 new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, authorUuids);
     }
 
@@ -75,6 +81,28 @@ public class BookServiceTest {
         assertThat(found.getAuthors())
                 .extracting(Author::getAuthorName)
                 .containsExactlyInAnyOrder("Robert Martin", "John Doe");
+    }
+
+    /**
+     * The same ISBN twice is the same book twice, and the catalogue takes it once.
+     *
+     * <p>This is what a natural key buys that book_uuid cannot: every create mints a fresh uuid,
+     * so two submissions of one form were two rows that nothing could tell apart afterwards —
+     * two entries for one title, each holding part of the shop's stock of it.
+     *
+     * <p>Nothing is asserted about the catalogue afterwards, because nothing can be: Postgres
+     * aborts the whole transaction on a failed statement, and this test method is one
+     * transaction, so every query after the rejected insert would fail too. That the second book
+     * does not survive is checked end to end in {@code BookControllerIntegrationTest}, where each
+     * request gets a transaction of its own — which is also how it works in production.
+     */
+    @Test
+    void create_refusesAnIsbnTheCatalogueAlreadyHolds() {
+        String isbn = Isbns.next();
+        bookService.create(sampleRequest(null, isbn));
+
+        assertThatThrownBy(() -> bookService.create(sampleRequest(null, isbn)))
+                .isInstanceOf(DuplicateIsbnException.class);
     }
 
     // get on a missing id throws.
@@ -288,7 +316,7 @@ public class BookServiceTest {
 
     // --- helper: a book that exists only to carry a title ---
     private void createTitled(String title) {
-        bookService.create(new BookRequest(title, "desc", new BigDecimal("39.99"),
+        bookService.create(new BookRequest(Isbns.next(), title, "desc", new BigDecimal("39.99"),
                 LocalDate.of(2021, 1, 1), "Wikibooks", 10, null));
     }
 
