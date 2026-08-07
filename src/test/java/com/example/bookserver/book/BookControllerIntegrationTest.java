@@ -1,5 +1,6 @@
 package com.example.bookserver.book;
 
+import com.example.bookserver.Isbns;
 import java.time.LocalDate;
 
 import org.junit.jupiter.api.Test;
@@ -67,10 +68,10 @@ class BookControllerIntegrationTest {
         authorMapper.insert(author);
 
         String createBody = """
-                {"bookTitle":"Clean Architecture","bookDescription":"desc",
+                {"isbn":"%s","bookTitle":"Clean Architecture","bookDescription":"desc",
                  "price":39.99,"publishDate":"2021-01-01","publisher":"Wikibooks","inventory":10,
                  "authorUuids":["%s"]}
-                """.formatted(author.getAuthorUuid());
+                """.formatted(Isbns.next(), author.getAuthorUuid());
 
         MvcResult created = mockMvc.perform(post("/api/books")
                         .header("Authorization", "Bearer " + token)
@@ -143,16 +144,49 @@ class BookControllerIntegrationTest {
                 .andExpect(jsonPath("$.inventory").value(30));   // the refusal changed nothing
     }
 
+    /**
+     * The same book submitted twice: created once, then refused, and the catalogue holds one.
+     *
+     * <p>Each request is its own transaction here, as in production, so this can check what the
+     * service test cannot — that the rejected insert leaves nothing behind. Without the ISBN
+     * there was nothing to reject against: every call mints a fresh book_uuid, so the second
+     * submission became a second book that no later request could tell from the first.
+     */
+    @Test
+    void create_refusesABookTheCatalogueAlreadyHolds() throws Exception {
+        String token = adminToken();
+        String body = """
+                {"isbn":"9780134494166","bookTitle":"Clean Architecture","bookDescription":"desc",
+                 "price":39.99,"publishDate":"2021-01-01","publisher":"Wikibooks","inventory":10,
+                 "authorUuids":[]}
+                """;
+
+        mockMvc.perform(post("/api/books")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/books")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(get("/api/books"))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
     /** Create a book through the API and return its uuid. */
     private String createBook(String token, String title) throws Exception {
         MvcResult created = mockMvc.perform(post("/api/books")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"bookTitle":"%s","bookDescription":"desc",
+                                {"isbn":"%s","bookTitle":"%s","bookDescription":"desc",
                                  "price":39.99,"publishDate":"2021-01-01","publisher":"Wikibooks",
                                  "inventory":10,"authorUuids":[]}
-                                """.formatted(title)))
+                                """.formatted(Isbns.next(), title)))
                 .andExpect(status().isCreated())
                 .andReturn();
         return JsonPath.read(created.getResponse().getContentAsString(), "$.bookUuid");

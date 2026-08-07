@@ -1,5 +1,6 @@
 package com.example.bookserver.book;
 
+import com.example.bookserver.Isbns;
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.common.Uuids;
 
@@ -28,7 +29,7 @@ public class AuthorMapperTest {
     // --- helper: a minimal book linked to the given author ---
     private UUID insertBookByAuthor(String title, UUID authorUuid) {
         UUID bookUuid = Uuids.newId();
-        Book book = new Book(bookUuid, title, "desc",
+        Book book = new Book(bookUuid, Isbns.next(), title, "desc",
                 new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, null);
         bookMapper.insert(book);
         bookMapper.linkAuthor(bookUuid, authorUuid);

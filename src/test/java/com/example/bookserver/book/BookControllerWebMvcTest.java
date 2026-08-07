@@ -1,5 +1,6 @@
 package com.example.bookserver.book;
 
+import com.example.bookserver.Isbns;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -59,7 +60,8 @@ class BookControllerWebMvcTest {
     private BookService bookService;
 
     private static final String CREATE_BODY = """
-            {"bookTitle":"Clean Architecture","bookDescription":"A book about software architecture",
+            {"isbn":"9780134494166",
+             "bookTitle":"Clean Architecture","bookDescription":"A book about software architecture",
              "price":39.99,"publishDate":"2021-01-01","publisher":"Wikibooks","inventory":10,
              "authorUuids":[]}
             """;
@@ -85,6 +87,11 @@ class BookControllerWebMvcTest {
                 .andExpect(jsonPath("$.bookUuid").value(uuid.toString()))
                 .andDo(document("book-create",
                         requestFields(
+                                fieldWithPath("isbn").description(
+                                        "ISBN-13: thirteen digits, 978/979 prefix, valid check "
+                                                + "digit. Unique across the catalogue, so "
+                                                + "resubmitting a book is a 409 rather than a "
+                                                + "second copy of it"),
                                 fieldWithPath("bookTitle").description("Book title"),
                                 fieldWithPath("bookDescription").description("Description (optional)"),
                                 fieldWithPath("price").description("Price (> 0, up to 2 decimals)"),
@@ -118,12 +125,39 @@ class BookControllerWebMvcTest {
         verify(bookService, never()).create(any());
     }
 
+    // a malformed ISBN never reaches the service: the check digit is validated at the edge
+    @Test
+    void create_returns400_whenTheIsbnIsMalformed() throws Exception {
+        mockMvc.perform(post("/api/books")
+                        .with(user("admin").roles("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CREATE_BODY.replace("9780134494166", "9780134494167")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.isbn").exists());
+
+        verify(bookService, never()).create(any());
+    }
+
+    // a resubmitted book -> 409, the natural key doing what a fresh uuid per call cannot
+    @Test
+    void create_returns409_whenTheIsbnAlreadyExists() throws Exception {
+        when(bookService.create(any(BookRequest.class)))
+                .thenThrow(new DuplicateIsbnException("9780134494166"));
+
+        mockMvc.perform(post("/api/books")
+                        .with(user("admin").roles("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CREATE_BODY))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"));
+    }
+
     // get: 200 with the book and its authors
     @Test
     void get_returnsBookWithAuthors() throws Exception {
         UUID bookUuid = UUID.randomUUID();
         Author author = new Author(UUID.randomUUID(), "Robert Martin");
-        Book book = new Book(bookUuid, "Clean Architecture", "desc",
+        Book book = new Book(bookUuid, Isbns.next(), "Clean Architecture", "desc",
                 new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10,
                 List.of(author));
         when(bookService.get(bookUuid)).thenReturn(book);
@@ -135,6 +169,7 @@ class BookControllerWebMvcTest {
                 .andDo(document("book-get",
                         responseFields(
                                 fieldWithPath("bookUuid").description("Book UUID"),
+                                fieldWithPath("isbn").description("ISBN-13"),
                                 fieldWithPath("bookTitle").description("Book title"),
                                 fieldWithPath("bookDescription").description("Description"),
                                 fieldWithPath("price").description("Price"),
@@ -159,7 +194,7 @@ class BookControllerWebMvcTest {
     // list: 200 with one page of books and the counts a page control needs
     @Test
     void list_returnsAPage() throws Exception {
-        Book book = new Book(UUID.randomUUID(), "Clean Architecture", "desc",
+        Book book = new Book(UUID.randomUUID(), Isbns.next(), "Clean Architecture", "desc",
                 new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, null);
         when(bookService.list(0, BookService.DEFAULT_SIZE))
                 .thenReturn(new BookPage(List.of(book), 0, 20, 103056));
@@ -208,7 +243,7 @@ class BookControllerWebMvcTest {
     // search: ?title= switches the collection read from "list everything" to "find these"
     @Test
     void search_returnsMatchingBooks() throws Exception {
-        Book book = new Book(UUID.randomUUID(), "Clean Architecture", "desc",
+        Book book = new Book(UUID.randomUUID(), Isbns.next(), "Clean Architecture", "desc",
                 new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, null);
         when(bookService.search("clean")).thenReturn(List.of(book));
 

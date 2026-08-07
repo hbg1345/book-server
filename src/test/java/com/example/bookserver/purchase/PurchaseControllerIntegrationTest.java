@@ -1,5 +1,6 @@
 package com.example.bookserver.purchase;
 
+import com.example.bookserver.Isbns;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -148,7 +149,7 @@ class PurchaseControllerIntegrationTest {
      * book at the service layer rather than logging in as an admin.
      */
     private String createBook() {
-        return bookService.create(new BookRequest("Clean Architecture", "desc",
+        return bookService.create(new BookRequest(Isbns.next(), "Clean Architecture", "desc",
                 new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, List.of()))
                 .toString();
     }

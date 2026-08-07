@@ -1,5 +1,6 @@
 package com.example.bookserver.book;
 
+import com.example.bookserver.Isbns;
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.common.Uuids;
 
@@ -29,6 +30,7 @@ public class BookMapperTest {
     private Book sampleBook(UUID bookId) {
         Book book = new Book();
         book.setBookUuid(bookId);
+        book.setIsbn(Isbns.next());
         book.setBookTitle("Clean Architecture");
         book.setBookDescription("A book about software architecture");
         book.setPrice(new BigDecimal("39.99"));

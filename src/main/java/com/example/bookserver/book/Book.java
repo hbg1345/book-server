@@ -17,6 +17,7 @@ import lombok.Setter;
 public class Book {
 
     private UUID bookUuid;
+    private String isbn;          // the book's identity outside this database; see V13
     private String bookTitle;
     private String bookDescription;
     private BigDecimal price;

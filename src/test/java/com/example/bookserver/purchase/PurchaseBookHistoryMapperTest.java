@@ -1,5 +1,6 @@
 package com.example.bookserver.purchase;
 
+import com.example.bookserver.Isbns;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -55,6 +56,7 @@ public class PurchaseBookHistoryMapperTest {
         UUID bookUuid = Uuids.newId();
         Book book = new Book();
         book.setBookUuid(bookUuid);
+        book.setIsbn(Isbns.next());
         book.setBookTitle(title);
         book.setBookDescription("desc");
         book.setPrice(new BigDecimal("25.00"));
