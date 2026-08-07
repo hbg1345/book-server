@@ -150,6 +150,66 @@ public class BookServiceTest {
                 .containsExactly("New Author");   // old link replaced, not appended
     }
 
+    /**
+     * An admin edits a title while the book is selling.
+     *
+     * <p>BookRequest is shared by create and update and its inventory is @NotNull, so there is
+     * no way to change a title without also sending a stock figure — and the figure the client
+     * has is the one it read before the admin started typing. BookMapper.update assigns it
+     * absolutely (inventory = #{inventory}), so saving the edit puts back stock that has since
+     * been sold.
+     *
+     * <p>This needs no threads to reproduce. The two writes do not overlap: the sale commits
+     * long before the edit is saved, and the edit overwrites it anyway. The window is not the
+     * microseconds between two statements but the minutes a form sits open.
+     *
+     * <p>Contrast decrementInventory, which is relative and conditional
+     * (SET inventory = inventory - ? WHERE inventory >= ?) and so cannot lose a concurrent
+     * write. Two paths write this column and only one of them is disciplined about it.
+     */
+    @Test
+    void update_withStaleInventory_doesNotReviveSoldStock() {
+        UUID bookUuid = bookService.create(sampleRequest(null));   // inventory 10
+
+        // the admin's client reads the book to populate its edit form
+        int inventoryTheFormRead = bookService.get(bookUuid).getInventory();
+
+        // while the form is open, three copies sell
+        assertThat(bookMapper.decrementInventory(bookUuid, 3)).isEqualTo(1);
+
+        // the admin changes only the title and saves, echoing back the stock it was given
+        bookService.update(bookUuid, new BookRequest("Clean Architecture, 2nd ed.",
+                "A book about software architecture", new BigDecimal("39.99"),
+                LocalDate.of(2021, 1, 1), "Wikibooks", inventoryTheFormRead, null));
+
+        assertThat(bookService.get(bookUuid).getInventory())
+                .as("the sale stands; a title edit must not restock the book")
+                .isEqualTo(7);
+    }
+
+    /**
+     * What the revived stock is worth: it can be ordered.
+     *
+     * <p>Inventory is what the catalogue offers and what decrementInventory guards against, so
+     * three copies invented by a title edit are three copies a customer can buy and pay for. The
+     * same end state as #55, reached from a third direction — there stock was invented by
+     * restoring a reservation twice, in #61 by registering a book twice, here by saving a form.
+     */
+    @Test
+    void update_withStaleInventory_doesNotLetTheShopOversell() {
+        UUID bookUuid = bookService.create(sampleRequest(null));   // inventory 10
+        int inventoryTheFormRead = bookService.get(bookUuid).getInventory();
+        bookMapper.decrementInventory(bookUuid, 3);                // 7 left in the shop
+
+        bookService.update(bookUuid, new BookRequest("Clean Architecture, 2nd ed.",
+                "A book about software architecture", new BigDecimal("39.99"),
+                LocalDate.of(2021, 1, 1), "Wikibooks", inventoryTheFormRead, null));
+
+        assertThat(bookMapper.decrementInventory(bookUuid, 10))
+                .as("only seven copies exist, so an order for ten must find insufficient stock")
+                .isZero();
+    }
+
     // update on a missing id throws.
     @Test
     void update_throws_whenAbsent() {
