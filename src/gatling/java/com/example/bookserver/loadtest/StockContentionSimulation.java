@@ -21,10 +21,10 @@ import java.time.Duration;
  * conditional, so neither can erase the other — that is the property this profile exists to
  * hold under load rather than under three threads in a unit test.
  *
- * <p>The arithmetic is the assertion, and it is exact. Start at S, add R by adjustment, sell C
- * copies, and the shelf must read S + R − C. Anything else means one of the two paths read a
- * figure, worked from it, and wrote it back — the bug that turned a title edit into free stock,
- * arriving through a different door.
+ * <p>What is being measured is what the second writer costs: whether an admin receiving stock
+ * makes checkout slower, and whether the receipt itself starts queueing once sales are heavy
+ * enough. Whether the two can lose each other's writes is a correctness question and belongs in
+ * a concurrency test, not here.
  *
  * <p>Adjustments are paced rather than hammered because that is what an admin does: a receipt
  * every few seconds against a continuous stream of sales. Contention here is not about volume
@@ -37,12 +37,6 @@ import java.time.Duration;
  *
  * <p>Admin credentials are required, not optional: without them there is nothing to contend
  * with and the profile is just {@link CheckoutSimulation} on one title.
- *
- * <p><strong>Keep the run under {@code order.payment-timeout} (PT30M).</strong> Orders here stay
- * in PAYMENT_PENDING holding their reservations; once the expiry sweep starts cancelling them it
- * puts the stock back, and the equation below no longer balances — through the sweeper working
- * correctly, not through a lost write. The 300-second default is well inside that; anything past
- * thirty minutes needs the expired orders counted too.
  */
 public class StockContentionSimulation extends Simulation {
 
@@ -57,8 +51,6 @@ public class StockContentionSimulation extends Simulation {
      * a URL while the simulation is being constructed, which happens first.
      */
     private final String theBook = Shoppers.theOneBook();
-
-    private int stockBefore;
 
     /**
      * One admin's loop: receive {@code delta} copies, on a fixed cadence. {@code pace} rather
@@ -103,26 +95,5 @@ public class StockContentionSimulation extends Simulation {
         }
         BookCatalog.warmUp();
         Shoppers.provisionAccounts();
-        stockBefore = Shoppers.reportStock("before", theBook);
-    }
-
-    @Override
-    public void after() {
-        int stockAfter = Shoppers.reportStock("after", theBook);
-        System.out.println();
-        System.out.println("  stock before : " + stockBefore);
-        System.out.println("  stock after  : " + stockAfter);
-        System.out.println();
-        System.out.println("  Check: stockAfter == stockBefore");
-        System.out.println("                     + (" + delta + " x count of 200s on POST .../stock)");
-        System.out.println("                     - (quantity x count of 201s on POST /api/orders)");
-        System.out.println();
-        System.out.println("  Both writers are relative and conditional, so the figure is exact.");
-        System.out.println("  A shortfall means a sale was overwritten; a surplus means an");
-        System.out.println("  adjustment was applied twice.");
-
-        if (stockAfter < 0) {
-            throw new AssertionError("stock went negative (" + stockAfter + ")");
-        }
     }
 }

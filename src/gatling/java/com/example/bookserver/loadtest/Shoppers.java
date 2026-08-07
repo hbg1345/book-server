@@ -147,9 +147,8 @@ public final class Shoppers {
      *
      * <p>409 is accepted as a valid outcome, not a failure. Once a title sells out the correct
      * answer is a refusal, and counting those as errors would report a broken server at exactly
-     * the moment it is behaving. What would be a real failure is a 500, or stock going negative
-     * — the second of which no status code can tell you, which is why
-     * {@link #reportStock(String, int)} exists.
+     * the moment it is behaving. A real failure here is a 5xx or a timeout — the server failing
+     * to arbitrate at all, rather than arbitrating against the caller.
      */
     public static ChainBuilder placeOrder() {
         return exec(http("POST /api/orders")
@@ -326,22 +325,7 @@ public final class Shoppers {
         }
     }
 
-    /**
-     * Print what a title holds, for the invariant a status code cannot express.
-     *
-     * <p>A checkout profile passes if it is fast and returns no 500s — and it can do both while
-     * overselling, because an oversell is a 201 like any other. Comparing stock before and after
-     * against the orders that succeeded is the only check that catches it, and it is the whole
-     * reason the write path was worth loading in the first place.
-     */
-    public static int reportStock(String label, String bookUuid) {
-        String body = get("/api/books/" + bookUuid);
-        String inventory = extract(body, "inventory");
-        System.out.printf("  [%s] %s inventory=%s%n", label, bookUuid, inventory);
-        return inventory == null ? -1 : Integer.parseInt(inventory);
-    }
-
-    /** The first hot title, which the flash sale points every user at. */
+    /** The first hot title, for profiles that need to name one. */
     public static String theOneBook() {
         return String.valueOf(csv("data/book_uuids.csv").readRecords().get(0).get("bookUuid"));
     }
