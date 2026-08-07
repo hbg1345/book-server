@@ -20,6 +20,7 @@ import com.jayway.jsonpath.JsonPath;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -97,6 +98,49 @@ class BookControllerIntegrationTest {
 
         mockMvc.perform(get("/api/books/{bookUuid}", bookUuid))
                 .andExpect(status().isNotFound());
+    }
+
+    /**
+     * An edit and a stock adjustment, end to end, against the real database.
+     *
+     * <p>The edit sends no stock figure — the body has no field for one — and the book keeps
+     * what it held. Stock then moves by a delta, and a write-off larger than the shelf is
+     * refused rather than driving the count below zero.
+     */
+    @Test
+    void editingABook_leavesStockToTheStockEndpoint() throws Exception {
+        String token = adminToken();
+        String bookUuid = createBook(token, "Clean Architecture");
+
+        mockMvc.perform(put("/api/books/{bookUuid}", bookUuid)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"bookTitle":"Clean Architecture, 2nd ed.","bookDescription":"desc",
+                                 "price":39.99,"publishDate":"2021-01-01","publisher":"Wikibooks",
+                                 "authorUuids":[]}
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/books/{bookUuid}", bookUuid))
+                .andExpect(jsonPath("$.bookTitle").value("Clean Architecture, 2nd ed."))
+                .andExpect(jsonPath("$.inventory").value(10));   // the edit said nothing about it
+
+        mockMvc.perform(post("/api/books/{bookUuid}/stock", bookUuid)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"delta\":20}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inventory").value(30));
+
+        mockMvc.perform(post("/api/books/{bookUuid}/stock", bookUuid)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"delta\":-31}"))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(get("/api/books/{bookUuid}", bookUuid))
+                .andExpect(jsonPath("$.inventory").value(30));   // the refusal changed nothing
     }
 
     /** Create a book through the API and return its uuid. */

@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.example.bookserver.auth.JwtProvider;
 import com.example.bookserver.auth.SecurityConfig;
 import com.example.bookserver.book.dto.BookRequest;
+import com.example.bookserver.book.dto.UpdateBookRequest;
 import com.example.bookserver.common.GlobalExceptionHandler;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -60,6 +61,13 @@ class BookControllerWebMvcTest {
     private static final String CREATE_BODY = """
             {"bookTitle":"Clean Architecture","bookDescription":"A book about software architecture",
              "price":39.99,"publishDate":"2021-01-01","publisher":"Wikibooks","inventory":10,
+             "authorUuids":[]}
+            """;
+
+    // no inventory: an edit says nothing about stock, which moves through /stock instead
+    private static final String UPDATE_BODY = """
+            {"bookTitle":"Clean Architecture","bookDescription":"A book about software architecture",
+             "price":39.99,"publishDate":"2021-01-01","publisher":"Wikibooks",
              "authorUuids":[]}
             """;
 
@@ -244,10 +252,10 @@ class BookControllerWebMvcTest {
         mockMvc.perform(put("/api/books/{bookUuid}", bookUuid)
                         .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(CREATE_BODY))
+                        .content(UPDATE_BODY))
                 .andExpect(status().isOk());
 
-        verify(bookService).update(eq(bookUuid), any(BookRequest.class));
+        verify(bookService).update(eq(bookUuid), any(UpdateBookRequest.class));
     }
 
     // update on a missing id -> 404
@@ -255,13 +263,63 @@ class BookControllerWebMvcTest {
     void update_returns404_whenAbsent() throws Exception {
         UUID bookUuid = UUID.randomUUID();
         doThrow(new BookNotFoundException(bookUuid))
-                .when(bookService).update(eq(bookUuid), any(BookRequest.class));
+                .when(bookService).update(eq(bookUuid), any(UpdateBookRequest.class));
 
         mockMvc.perform(put("/api/books/{bookUuid}", bookUuid)
                         .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(CREATE_BODY))
+                        .content(UPDATE_BODY))
                 .andExpect(status().isNotFound());
+    }
+
+    // stock: the delta reaches the service and the new total comes back
+    @Test
+    void adjustStock_returnsNewTotal() throws Exception {
+        UUID bookUuid = UUID.randomUUID();
+        when(bookService.adjustStock(bookUuid, 20)).thenReturn(30);
+
+        mockMvc.perform(post("/api/books/{bookUuid}/stock", bookUuid)
+                        .with(user("admin").roles("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"delta\":20}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inventory").value(30))
+                .andDo(document("book-stock-adjust",
+                        requestFields(
+                                fieldWithPath("delta").description(
+                                        "Copies to add (positive) or remove (negative). Not "
+                                                + "idempotent: sending the same body twice moves "
+                                                + "the stock twice")),
+                        responseFields(
+                                fieldWithPath("inventory").description(
+                                        "Stock on hand after the adjustment"))));
+    }
+
+    // writing off more than the shop holds -> 409, not a negative stock level
+    @Test
+    void adjustStock_returns409_whenItWouldGoNegative() throws Exception {
+        UUID bookUuid = UUID.randomUUID();
+        when(bookService.adjustStock(bookUuid, -11))
+                .thenThrow(new InsufficientStockException(bookUuid, -11));
+
+        mockMvc.perform(post("/api/books/{bookUuid}/stock", bookUuid)
+                        .with(user("admin").roles("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"delta\":-11}"))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"));
+    }
+
+    // moving stock is a catalogue write, so it is ADMIN-only like the rest of them
+    @Test
+    void adjustStock_returns403_whenNotAdmin() throws Exception {
+        mockMvc.perform(post("/api/books/{bookUuid}/stock", UUID.randomUUID())
+                        .with(user("shopper").roles("USER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"delta\":20}"))
+                .andExpect(status().isForbidden());
+
+        verify(bookService, never()).adjustStock(any(), anyInt());
     }
 
     // delete: delegates to the service

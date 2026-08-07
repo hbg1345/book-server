@@ -20,6 +20,7 @@ import com.example.bookserver.address.InvalidPostalCodeException;
 import com.example.bookserver.auth.InvalidRefreshTokenException;
 import com.example.bookserver.book.BlankSearchQueryException;
 import com.example.bookserver.book.BookNotFoundException;
+import com.example.bookserver.book.InsufficientStockException;
 import com.example.bookserver.book.InvalidPageException;
 import com.example.bookserver.cart.CartItemNotFoundException;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
@@ -60,6 +61,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(BookNotFoundException.class)
     public ProblemDetail handleBookNotFound(BookNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Writing off more copies of a book than the shop holds. */
+    @ExceptionHandler(InsufficientStockException.class)
+    public ProblemDetail handleInsufficientStock(InsufficientStockException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     /** A catalogue search with an empty query, which would match the whole catalogue. */

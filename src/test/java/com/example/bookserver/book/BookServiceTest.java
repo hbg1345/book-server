@@ -2,6 +2,7 @@ package com.example.bookserver.book;
 
 import com.example.bookserver.TestcontainersConfiguration;
 import com.example.bookserver.book.dto.BookRequest;
+import com.example.bookserver.book.dto.UpdateBookRequest;
 import com.example.bookserver.common.Uuids;
 
 import java.math.BigDecimal;
@@ -39,6 +40,12 @@ public class BookServiceTest {
     private BookRequest sampleRequest(List<UUID> authorUuids) {
         return new BookRequest("Clean Architecture", "A book about software architecture",
                 new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, authorUuids);
+    }
+
+    /** The same book with a new title. No stock figure — the update body no longer carries one. */
+    private UpdateBookRequest updateReq(String bookTitle) {
+        return new UpdateBookRequest(bookTitle, "A book about software architecture",
+                new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", null);
     }
 
     // create persists the book body and returns a fetchable uuid.
@@ -123,7 +130,8 @@ public class BookServiceTest {
                 .isInstanceOf(InvalidPageException.class);
     }
 
-    // update rewrites every mutable field and replaces the author links.
+    // update rewrites every catalogue field and replaces the author links — and leaves stock,
+    // which is not a catalogue field, exactly where it was.
     @Test
     void update_changesFields_andReplacesAuthors() {
         Author oldAuthor = new Author(Uuids.newId(), "Old Author");
@@ -133,8 +141,8 @@ public class BookServiceTest {
 
         UUID bookUuid = bookService.create(sampleRequest(List.of(oldAuthor.getAuthorUuid())));
 
-        BookRequest changed = new BookRequest("Clean Code", "Updated description",
-                new BigDecimal("49.99"), LocalDate.of(2008, 8, 1), "Prentice Hall", 5,
+        UpdateBookRequest changed = new UpdateBookRequest("Clean Code", "Updated description",
+                new BigDecimal("49.99"), LocalDate.of(2008, 8, 1), "Prentice Hall",
                 List.of(newAuthor.getAuthorUuid()));
         bookService.update(bookUuid, changed);
 
@@ -144,7 +152,7 @@ public class BookServiceTest {
         assertThat(found.getPrice()).isEqualByComparingTo("49.99");
         assertThat(found.getPublishDate()).isEqualTo(LocalDate.of(2008, 8, 1));
         assertThat(found.getPublisher()).isEqualTo("Prentice Hall");
-        assertThat(found.getInventory()).isEqualTo(5);
+        assertThat(found.getInventory()).isEqualTo(10);   // untouched by the edit
         assertThat(found.getAuthors())
                 .extracting(Author::getAuthorName)
                 .containsExactly("New Author");   // old link replaced, not appended
@@ -153,34 +161,20 @@ public class BookServiceTest {
     /**
      * An admin edits a title while the book is selling.
      *
-     * <p>BookRequest is shared by create and update and its inventory is @NotNull, so there is
-     * no way to change a title without also sending a stock figure — and the figure the client
-     * has is the one it read before the admin started typing. BookMapper.update assigns it
-     * absolutely (inventory = #{inventory}), so saving the edit puts back stock that has since
-     * been sold.
-     *
-     * <p>This needs no threads to reproduce. The two writes do not overlap: the sale commits
-     * long before the edit is saved, and the edit overwrites it anyway. The window is not the
-     * microseconds between two statements but the minutes a form sits open.
-     *
-     * <p>Contrast decrementInventory, which is relative and conditional
-     * (SET inventory = inventory - ? WHERE inventory >= ?) and so cannot lose a concurrent
-     * write. Two paths write this column and only one of them is disciplined about it.
+     * <p>The edit form has no stock figure to echo back, because UpdateBookRequest has no such
+     * field. The sale therefore survives an edit saved after it, however long the form sat open
+     * — which is the point, since that window is minutes rather than the microseconds between
+     * two statements, and no amount of locking would have narrowed it.
      */
     @Test
-    void update_withStaleInventory_doesNotReviveSoldStock() {
+    void update_doesNotReviveSoldStock() {
         UUID bookUuid = bookService.create(sampleRequest(null));   // inventory 10
 
-        // the admin's client reads the book to populate its edit form
-        int inventoryTheFormRead = bookService.get(bookUuid).getInventory();
-
-        // while the form is open, three copies sell
+        // while the admin's form is open, three copies sell
         assertThat(bookMapper.decrementInventory(bookUuid, 3)).isEqualTo(1);
 
-        // the admin changes only the title and saves, echoing back the stock it was given
-        bookService.update(bookUuid, new BookRequest("Clean Architecture, 2nd ed.",
-                "A book about software architecture", new BigDecimal("39.99"),
-                LocalDate.of(2021, 1, 1), "Wikibooks", inventoryTheFormRead, null));
+        // the admin changes only the title and saves
+        bookService.update(bookUuid, updateReq("Clean Architecture, 2nd ed."));
 
         assertThat(bookService.get(bookUuid).getInventory())
                 .as("the sale stands; a title edit must not restock the book")
@@ -188,32 +182,95 @@ public class BookServiceTest {
     }
 
     /**
-     * What the revived stock is worth: it can be ordered.
+     * What revived stock would have been worth: it could be ordered.
      *
      * <p>Inventory is what the catalogue offers and what decrementInventory guards against, so
-     * three copies invented by a title edit are three copies a customer can buy and pay for. The
-     * same end state as #55, reached from a third direction — there stock was invented by
+     * copies invented by a title edit would have been copies a customer could buy and pay for —
+     * the same end state as #55, reached from a third direction. There stock was invented by
      * restoring a reservation twice, in #61 by registering a book twice, here by saving a form.
      */
     @Test
-    void update_withStaleInventory_doesNotLetTheShopOversell() {
+    void update_doesNotLetTheShopOversell() {
         UUID bookUuid = bookService.create(sampleRequest(null));   // inventory 10
-        int inventoryTheFormRead = bookService.get(bookUuid).getInventory();
         bookMapper.decrementInventory(bookUuid, 3);                // 7 left in the shop
 
-        bookService.update(bookUuid, new BookRequest("Clean Architecture, 2nd ed.",
-                "A book about software architecture", new BigDecimal("39.99"),
-                LocalDate.of(2021, 1, 1), "Wikibooks", inventoryTheFormRead, null));
+        bookService.update(bookUuid, updateReq("Clean Architecture, 2nd ed."));
 
         assertThat(bookMapper.decrementInventory(bookUuid, 10))
                 .as("only seven copies exist, so an order for ten must find insufficient stock")
                 .isZero();
     }
 
+    // stock moves by a delta, in both directions, and reports what the book holds afterwards.
+    @Test
+    void adjustStock_appliesDelta_andReturnsNewTotal() {
+        UUID bookUuid = bookService.create(sampleRequest(null));   // inventory 10
+
+        assertThat(bookService.adjustStock(bookUuid, 20)).isEqualTo(30);   // received
+        assertThat(bookService.adjustStock(bookUuid, -2)).isEqualTo(28);   // written off
+        assertThat(bookService.get(bookUuid).getInventory()).isEqualTo(28);
+    }
+
+    // a delta composes with a sale whatever order the two arrive in — the property a total
+    // cannot have, and the reason this endpoint takes one.
+    @Test
+    void adjustStock_composesWithASale_inEitherOrder() {
+        UUID sellFirst = bookService.create(sampleRequest(null));   // inventory 10
+        bookMapper.decrementInventory(sellFirst, 3);
+        bookService.adjustStock(sellFirst, 20);
+
+        UUID receiveFirst = bookService.create(sampleRequest(null));   // inventory 10
+        bookService.adjustStock(receiveFirst, 20);
+        bookMapper.decrementInventory(receiveFirst, 3);
+
+        assertThat(bookService.get(sellFirst).getInventory()).isEqualTo(27);
+        assertThat(bookService.get(receiveFirst).getInventory())
+                .as("order of arrival must not change the result")
+                .isEqualTo(27);
+    }
+
+    /**
+     * Two adjustments of the same size on the same book are two adjustments. Nothing here
+     * recognises a repeat, because nothing in the request says whether twenty more copies
+     * arrived twice or the same arrival was submitted twice — the frontend has to not send it.
+     */
+    @Test
+    void adjustStock_repeatedDelta_appliesEachTime() {
+        UUID bookUuid = bookService.create(sampleRequest(null));   // inventory 10
+
+        assertThat(bookService.adjustStock(bookUuid, 20)).isEqualTo(30);
+        assertThat(bookService.adjustStock(bookUuid, 20)).isEqualTo(50);
+    }
+
+    // writing off more copies than the shop holds is refused, and changes nothing.
+    @Test
+    void adjustStock_belowZero_throwsAndLeavesStockAlone() {
+        UUID bookUuid = bookService.create(sampleRequest(null));   // inventory 10
+
+        assertThatThrownBy(() -> bookService.adjustStock(bookUuid, -11))
+                .isInstanceOf(InsufficientStockException.class);
+        assertThat(bookService.get(bookUuid).getInventory()).isEqualTo(10);
+    }
+
+    // emptying the shelf exactly is allowed; zero is a legitimate stock level.
+    @Test
+    void adjustStock_toExactlyZero_isAllowed() {
+        UUID bookUuid = bookService.create(sampleRequest(null));   // inventory 10
+
+        assertThat(bookService.adjustStock(bookUuid, -10)).isZero();
+    }
+
+    // moving stock on a book that does not exist is a 404, not a silent no-op.
+    @Test
+    void adjustStock_throws_whenAbsent() {
+        assertThatThrownBy(() -> bookService.adjustStock(Uuids.newId(), 5))
+                .isInstanceOf(BookNotFoundException.class);
+    }
+
     // update on a missing id throws.
     @Test
     void update_throws_whenAbsent() {
-        assertThatThrownBy(() -> bookService.update(Uuids.newId(), sampleRequest(null)))
+        assertThatThrownBy(() -> bookService.update(Uuids.newId(), updateReq("Clean Architecture")))
                 .isInstanceOf(BookNotFoundException.class);
     }
 
