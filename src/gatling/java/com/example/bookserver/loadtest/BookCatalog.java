@@ -1,6 +1,7 @@
 package com.example.bookserver.loadtest;
 
 import static io.gatling.javaapi.core.CoreDsl.csv;
+import static io.gatling.javaapi.core.CoreDsl.exec;
 import static io.gatling.javaapi.core.CoreDsl.feed;
 import static io.gatling.javaapi.core.CoreDsl.percent;
 import static io.gatling.javaapi.core.CoreDsl.randomSwitch;
@@ -18,16 +19,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * The one thing every profile drives: reading the book catalogue. The five simulations differ
- * only in how many users arrive and for how long — the work they do is defined here once.
- *
- * <p><strong>Why the detail endpoint and not the list.</strong> {@code GET /api/books} has no
- * pagination and the catalogue holds ~103k rows, so a single call serialises the whole table.
- * Loading it would measure how fast the server runs out of memory, which is a defect to fix
- * rather than a performance characteristic to chart. {@code GET /api/books/{uuid}} is the
- * indexed single-row read that a real catalogue page issues, so it is what gets loaded here.
+ * Catalogue requests shared by every load profile. The application exposes three ordinary
+ * reader actions: page through the catalogue, search by title, and open one book. Keeping those
+ * actions here lets endpoint-only and mixed simulations exercise identical HTTP requests.
  */
 public final class BookCatalog {
 
@@ -68,17 +65,21 @@ public final class BookCatalog {
         return csv("data/book_uuids.csv").random();
     }
 
-    /**
-     * 2000 author names sampled from the same seed. Names are fed as a query parameter rather
-     * than spliced into the path so Gatling percent-encodes them — most of this catalogue's
-     * names are "Surname, Forename", and a raw comma or space in a URL is not a request anyone
-     * meant to send.
-     */
-    private static FeederBuilder<String> authorNames() {
-        return csv("data/author_names.csv").random();
+    /** Search tokens derived from the same 2000 seeded books used by the detail feeder. */
+    private static FeederBuilder<String> bookSearchTerms() {
+        return csv("data/book_search_terms.csv").random();
     }
 
-    /** The cheap read: a single row by primary key. */
+    /** A normal catalogue page. Vary shallow pages so the test is not one permanently hot key. */
+    private static ChainBuilder listBooks() {
+        return exec(http("GET /api/books?page={page}&size=20")
+                .get("/api/books")
+                .queryParam("page", session -> ThreadLocalRandom.current().nextInt(0, 20))
+                .queryParam("size", 20)
+                .check(status().is(200)));
+    }
+
+    /** The indexed book lookup used after a reader selects a result. */
     private static ChainBuilder openBookDetail() {
         return feed(bookUuids())
                 .exec(http("GET /api/books/{bookUuid}")
@@ -87,48 +88,60 @@ public final class BookCatalog {
     }
 
     /**
-     * The expensive read, and the reason this profile exists.
+     * User-facing title search: a case-insensitive substring over the catalogue.
      *
-     * <p>{@code AuthorMapper.findByName} filters on {@code author_name}, which carries no index —
-     * V1 indexed only the primary key and V2 merely widened the column to TEXT. Every search is
-     * therefore a sequential scan of all 71,081 authors, and each match then costs a second
-     * query for the author's book titles.
-     *
-     * <p>Loading only the primary-key read would report a ceiling this endpoint cannot meet, so
-     * the mix exists to keep the measurement honest. It also makes the obvious fix measurable:
-     * add an index on {@code author_name}, re-run, and the difference is the whole argument.
+     * <p>{@code ILIKE '%term%'} cannot use an ordinary B-tree index, so this is intentionally the
+     * expensive request in the browsing mix. Feeding varied tokens avoids measuring one cached
+     * search repeatedly, while every term is guaranteed to occur in seeded data.
      */
-    private static ChainBuilder searchAuthorByName() {
-        return feed(authorNames())
-                .exec(http("GET /api/authors?name=")
-                        .get("/api/authors")
-                        .queryParam("name", "#{authorName}")
+    private static ChainBuilder searchBooksByTitle() {
+        return feed(bookSearchTerms())
+                .exec(http("GET /api/books?title={bookSearchTerm}")
+                        .get("/api/books")
+                        .queryParam("title", "#{bookSearchTerm}")
                         .check(status().is(200)));
     }
 
-    /** Browsing pace: a pause between requests, as a reader would take. */
-    public static ScenarioBuilder readScenario(String name) {
-        return readScenario(name, LoadTestConfig.THINK_TIME_MIN, LoadTestConfig.THINK_TIME_MAX);
+    public static ScenarioBuilder bookListScenario(String name) {
+        return bookListScenario(name, LoadTestConfig.THINK_TIME_MIN, LoadTestConfig.THINK_TIME_MAX);
+    }
+
+    public static ScenarioBuilder bookListScenario(String name, Duration pauseMin, Duration pauseMax) {
+        return scenario(name).exec(listBooks()).pause(pauseMin, pauseMax);
+    }
+
+    public static ScenarioBuilder titleSearchScenario(String name) {
+        return titleSearchScenario(name, LoadTestConfig.THINK_TIME_MIN, LoadTestConfig.THINK_TIME_MAX);
+    }
+
+    public static ScenarioBuilder titleSearchScenario(String name, Duration pauseMin, Duration pauseMax) {
+        return scenario(name).exec(searchBooksByTitle()).pause(pauseMin, pauseMax);
+    }
+
+    public static ScenarioBuilder bookDetailScenario(String name) {
+        return bookDetailScenario(name, LoadTestConfig.THINK_TIME_MIN, LoadTestConfig.THINK_TIME_MAX);
+    }
+
+    public static ScenarioBuilder bookDetailScenario(String name, Duration pauseMin, Duration pauseMax) {
+        return scenario(name).exec(openBookDetail()).pause(pauseMin, pauseMax);
+    }
+
+    /** Browsing pace with the configurable list/search/detail request mix. */
+    public static ScenarioBuilder browsingScenario(String name) {
+        return browsingScenario(name, LoadTestConfig.THINK_TIME_MIN, LoadTestConfig.THINK_TIME_MAX);
     }
 
     /**
-     * One user's loop: a weighted choice of read, then a pause. The weighting is what makes this
-     * a load test rather than a benchmark — a real population does not spend all its time on the
-     * cheapest endpoint, and a server sized against that assumption falls over on the mix.
-     *
-     * <p>Defaults to 70/30 detail/search. Set {@code -PauthorSearchPct=0} to go back to loading
-     * the single-row read alone, or 100 to isolate the scan.
+     * One virtual user's action, selected from the catalogue mix, followed by a reading pause.
+     * Defaults to 30% list, 20% title search, and 50% detail. The endpoint-only simulations are
+     * the right tool for isolated capacity; this mix is for shared-resource contention.
      */
-    public static ScenarioBuilder readScenario(String name, Duration pauseMin, Duration pauseMax) {
-        double searchPct = LoadTestConfig.AUTHOR_SEARCH_PCT;
-        ChainBuilder reads = searchPct <= 0 ? openBookDetail()
-                : searchPct >= 100 ? searchAuthorByName()
-                : randomSwitch().on(
-                        percent(100 - searchPct).then(openBookDetail()),
-                        percent(searchPct).then(searchAuthorByName()));
+    public static ScenarioBuilder browsingScenario(String name, Duration pauseMin, Duration pauseMax) {
+        ChainBuilder reads = randomSwitch().on(
+                percent(LoadTestConfig.BOOK_LIST_PCT).then(listBooks()),
+                percent(LoadTestConfig.TITLE_SEARCH_PCT).then(searchBooksByTitle()),
+                percent(LoadTestConfig.BOOK_DETAIL_PCT).then(openBookDetail()));
 
-        // Uniform random within the range, so users drift out of lockstep instead of arriving
-        // as a pulse every N seconds.
         return scenario(name).exec(reads).pause(pauseMin, pauseMax);
     }
 

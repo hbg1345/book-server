@@ -38,12 +38,8 @@ import io.gatling.javaapi.core.Simulation;
  */
 public class BreakPointSimulation extends Simulation {
 
-    // 500 users over 120s — one added every 0.24s.
-    //
-    // Sized from measurement rather than guessed: at 200 concurrent requests this server already
-    // served 368 req/s at a p95 of 744ms, against 75ms unloaded. It is deep into queueing well
-    // before 500, so 500 clears the ceiling with room to spare and there is nothing to learn from
-    // climbing further.
+    // 500 users over 120s — one added every 0.24s. This is a starting search range, not a claimed
+    // capacity: raise maxUsers and re-run if the latency curve is still flat at the end.
     //
     // 0.24s between arrivals is fast but not too fast. The floor on ramp speed is Cloud Run's
     // scale-out: a new instance needs seconds to start a JVM, and pouring users in faster than
@@ -52,7 +48,7 @@ public class BreakPointSimulation extends Simulation {
     private final java.time.Duration duration = LoadTestConfig.seconds("duration", 120);
 
     {
-        setUp(BookCatalog.readScenario("breakpoint",
+        setUp(BookCatalog.browsingScenario("catalog-browsing-breakpoint",
                         // No pause, unlike every other profile. A think time turns user count into
                         // a figure that only means something next to the pause it was measured
                         // with; with none, concurrent users are concurrent requests and the result

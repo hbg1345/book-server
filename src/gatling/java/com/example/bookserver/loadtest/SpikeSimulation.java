@@ -27,31 +27,37 @@ import java.time.Duration;
  */
 public class SpikeSimulation extends Simulation {
 
+    private static final Duration SPIKE_RAMP = Duration.ofSeconds(10);
+
     private final int baseline = LoadTestConfig.intProp("baselineUsers", 20);
     private final int spike = LoadTestConfig.intProp("spikeUsers", 400);
     private final Duration beforeSpike = LoadTestConfig.seconds("beforeSpike", 120);
     private final Duration spikeHold = LoadTestConfig.seconds("spikeHold", 60);
     private final Duration afterSpike = LoadTestConfig.seconds("afterSpike", 300);
 
-    private final Duration total = beforeSpike.plus(spikeHold).plus(afterSpike);
+    private final Duration total = beforeSpike
+            .plus(SPIKE_RAMP)
+            .plus(spikeHold)
+            .plus(SPIKE_RAMP)
+            .plus(afterSpike);
 
     {
         setUp(
                 // Ordinary traffic, running for the whole test — the victim, and the measurement.
-                BookCatalog.readScenario("baseline").injectClosed(
+                BookCatalog.browsingScenario("catalog-browsing-baseline").injectClosed(
                         constantConcurrentUsers(baseline).during(total)),
 
                 // The surge. Ten seconds to full is as close to instantaneous as is useful:
                 // truly zero would only measure Gatling's own thread start-up.
-                BookCatalog.readScenario("spike").injectClosed(
+                BookCatalog.browsingScenario("catalog-browsing-spike").injectClosed(
                         // Closed-model equivalent of nothingFor(): hold zero users. The open-model
                         // step cannot be mixed into a closed injection profile.
                         constantConcurrentUsers(0).during(beforeSpike),
-                        rampConcurrentUsers(0).to(spike).during(Duration.ofSeconds(10)),
+                        rampConcurrentUsers(0).to(spike).during(SPIKE_RAMP),
                         constantConcurrentUsers(spike).during(spikeHold),
                         // Vanish as abruptly as they arrived, leaving the baseline to reveal how
                         // long the server takes to come back.
-                        rampConcurrentUsers(spike).to(0).during(Duration.ofSeconds(10))))
+                        rampConcurrentUsers(spike).to(0).during(SPIKE_RAMP)))
                 .protocols(BookCatalog.httpProtocol());
     }
 

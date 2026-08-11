@@ -125,9 +125,9 @@ tasks.register('benchmark', Test) {
     }
 }
 
-// Load tests. Simulations live in src/gatling/java; see docs/load-test-guide.md.
+// Load tests. Simulations live in src/gatling/java; see LOAD_TEST_GUIDE.md.
 //
-//   ./gradlew gatlingRun --simulation=com.example.bookserver.loadtest.BreakPointSimulation
+//   bash gradlew gatlingRun --simulation=com.example.bookserver.loadtest.BreakPointSimulation
 //
 // Deliberately not wired into `build` or `check`: these fire real traffic at the deployed Cloud
 // Run revision, so they must be something a person chooses to run, never a side effect of a
@@ -138,7 +138,7 @@ tasks.register('benchmark', Test) {
 def loadTestProps = ['baseUrl', 'users', 'baselineUsers', 'spikeUsers', 'maxUsers',
                      'duration', 'rampUp', 'recovery', 'beforeSpike', 'spikeHold', 'afterSpike',
                      'thinkTime', 'thinkTimeMin', 'thinkTimeMax', 'warmupRequests',
-                     'authorSearchPct', 'shareConnections']
+                     'bookListPct', 'titleSearchPct', 'shareConnections']
         .findAll { project.hasProperty(it) }
         .collect { "-D${it}=${project.property(it)}".toString() }
 
