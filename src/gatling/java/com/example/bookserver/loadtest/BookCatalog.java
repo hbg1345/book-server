@@ -65,7 +65,11 @@ public final class BookCatalog {
         return csv("data/book_uuids.csv").random();
     }
 
-    /** Search tokens derived from the same 2000 seeded books used by the detail feeder. */
+    /**
+     * Search tokens derived from the same 2000 seeded books used by the detail feeder.
+     * Each row also carries its result-count band for reporting; the terms, order, duplicates,
+     * and therefore their random selection probabilities remain unchanged.
+     */
     private static FeederBuilder<String> bookSearchTerms() {
         return csv("data/book_search_terms.csv").random();
     }
@@ -96,7 +100,8 @@ public final class BookCatalog {
      */
     private static ChainBuilder searchBooksByTitle() {
         return feed(bookSearchTerms())
-                .exec(http("GET /api/books?title={bookSearchTerm}")
+                .exec(http(session -> "GET /api/books?title=["
+                                + session.getString("searchBand") + "]")
                         .get("/api/books")
                         .queryParam("title", "#{bookSearchTerm}")
                         .check(status().is(200)));
