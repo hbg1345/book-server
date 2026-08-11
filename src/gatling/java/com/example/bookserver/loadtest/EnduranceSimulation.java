@@ -31,7 +31,7 @@ public class EnduranceSimulation extends Simulation {
     private final java.time.Duration duration = LoadTestConfig.seconds("duration", 8 * 60 * 60);
 
     {
-        setUp(BookCatalog.readScenario("endurance").injectClosed(
+        setUp(BookCatalog.browsingScenario("catalog-browsing-endurance").injectClosed(
                         rampConcurrentUsers(0).to(users).during(rampUp),
                         constantConcurrentUsers(users).during(duration)))
                 .protocols(BookCatalog.httpProtocol())

@@ -36,7 +36,7 @@ public class StressSimulation extends Simulation {
     private final java.time.Duration recovery = LoadTestConfig.seconds("recovery", 300);
 
     {
-        setUp(BookCatalog.readScenario("stress").injectClosed(
+        setUp(BookCatalog.browsingScenario("catalog-browsing-stress").injectClosed(
                         rampConcurrentUsers(0).to(users).during(rampUp),
                         constantConcurrentUsers(users).during(duration),
                         // Drop sharply rather than ramping down: recovery from a cliff is the

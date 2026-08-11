@@ -87,15 +87,40 @@ public final class LoadTestConfig {
             !"false".equalsIgnoreCase(System.getProperty("shareConnections", "true"));
 
     /**
-     * Share of requests that go to the author search rather than the book detail read, as a
-     * percentage. 30 by default: enough that the unindexed scan shapes the result, low enough
-     * that the mix still resembles browsing a catalogue rather than hammering search.
+     * Default catalogue-browsing mix. These are placeholders until production access logs can
+     * supply observed ratios: 30% page through the catalogue, 20% search by title, and the
+     * remaining 50% open a book detail page.
+     *
+     * <p>The endpoint-specific simulations bypass these values entirely. They only shape the
+     * mixed Load/Stress/Spike/Endurance and catalogue breakpoint profiles.
      */
-    public static final double AUTHOR_SEARCH_PCT = doubleProp("authorSearchPct", 30);
+    public static final double BOOK_LIST_PCT = percentage("bookListPct", 30);
+
+    public static final double TITLE_SEARCH_PCT = percentage("titleSearchPct", 20);
+
+    public static final double BOOK_DETAIL_PCT = detailPercentage();
 
     public static double doubleProp(String key, double fallback) {
         String raw = System.getProperty(key);
         return raw == null || raw.isBlank() ? fallback : Double.parseDouble(raw.trim());
+    }
+
+    private static double percentage(String key, double fallback) {
+        double value = doubleProp(key, fallback);
+        if (value < 0 || value > 100) {
+            throw new IllegalArgumentException(key + " must be between 0 and 100, got " + value);
+        }
+        return value;
+    }
+
+    private static double detailPercentage() {
+        double detail = 100 - BOOK_LIST_PCT - TITLE_SEARCH_PCT;
+        if (detail < 0) {
+            throw new IllegalArgumentException(
+                    "bookListPct + titleSearchPct must not exceed 100, got "
+                            + (BOOK_LIST_PCT + TITLE_SEARCH_PCT));
+        }
+        return detail;
     }
 
     public static int intProp(String key, int fallback) {

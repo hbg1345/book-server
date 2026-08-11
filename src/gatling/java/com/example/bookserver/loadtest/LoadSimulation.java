@@ -28,7 +28,7 @@ public class LoadSimulation extends Simulation {
     private final java.time.Duration duration = LoadTestConfig.seconds("duration", 600);
 
     {
-        setUp(BookCatalog.readScenario("load").injectClosed(
+        setUp(BookCatalog.browsingScenario("catalog-browsing-load").injectClosed(
                         // Ramp rather than drop all users at once: an instant arrival of the full
                         // population measures Cloud Run's scale-out, which is a different question.
                         rampConcurrentUsers(0).to(users).during(rampUp),
