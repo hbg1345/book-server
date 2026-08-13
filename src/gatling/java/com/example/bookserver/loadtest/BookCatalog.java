@@ -73,6 +73,14 @@ public final class BookCatalog {
         return csv("data/book_search_terms.csv").random();
     }
 
+    /**
+     * Broad terms with more than 2,200 matches in the seeded catalogue. Both sides of the
+     * page-0/page-100 comparison use this exact feeder, so the only changed input is OFFSET.
+     */
+    private static FeederBuilder<String> deepSearchTerms() {
+        return csv("data/book_search_deep_terms.csv").random();
+    }
+
     /** The indexed book lookup used after a reader selects a result. */
     private static ChainBuilder openBookDetail() {
         return feed(bookUuids())
@@ -94,6 +102,16 @@ public final class BookCatalog {
                                 + session.getString("searchBand") + "]")
                         .get("/api/books")
                         .queryParam("title", "#{bookSearchTerm}")
+                        .queryParam("page", "0")
+                        .check(status().is(200)));
+    }
+
+    private static ChainBuilder searchBroadTitlesAtPage(int page) {
+        return feed(deepSearchTerms())
+                .exec(http("GET /api/books?title=[broad]&page=" + page)
+                        .get("/api/books")
+                        .queryParam("title", "#{bookSearchTerm}")
+                        .queryParam("page", Integer.toString(page))
                         .check(status().is(200)));
     }
 
@@ -103,6 +121,18 @@ public final class BookCatalog {
 
     public static ScenarioBuilder titleSearchScenario(String name, Duration pauseMin, Duration pauseMax) {
         return scenario(name).exec(searchBooksByTitle()).pause(pauseMin, pauseMax);
+    }
+
+    /** Same broad terms as the deep-page scenario, but with no rows skipped. */
+    public static ScenarioBuilder titleSearchFirstPageComparisonScenario(String name) {
+        return scenario(name)
+                .exec(searchBroadTitlesAtPage(0));
+    }
+
+    /** Broad terms at a configurable deep page, page 100 by default. */
+    public static ScenarioBuilder titleSearchDeepPageComparisonScenario(String name) {
+        return scenario(name)
+                .exec(searchBroadTitlesAtPage(LoadTestConfig.SEARCH_DEEP_PAGE));
     }
 
     public static ScenarioBuilder bookDetailScenario(String name) {

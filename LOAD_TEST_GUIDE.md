@@ -29,6 +29,29 @@ If latency and error rate are still flat at 500, raise `-PmaxUsers`. If they ben
 500, the existing range is sufficient; report the throughput and p95/p99 at the bend rather than
 only the virtual-user count.
 
+## Search page-depth comparison
+
+These two simulations use the same broad search-term feeder and load shape. The first requests
+page 0; the second requests page 100 by default (20 books per page, so PostgreSQL skips 2,000
+matches). Run them against the same deployed revision with the same properties.
+
+```bash
+# Page 0 baseline
+JAVA_HOME=$(/usr/libexec/java_home -v 17) bash gradlew \
+  -PmaxUsers=500 -Pduration=120 gatlingRun \
+  --simulation com.example.bookserver.loadtest.BookTitleSearchFirstPageBreakPointSimulation \
+  --run-description "book-title-search_page-0_max-500_120s"
+
+# Deep page; override -PsearchDeepPage to test a different depth
+JAVA_HOME=$(/usr/libexec/java_home -v 17) bash gradlew \
+  -PsearchDeepPage=100 -PmaxUsers=500 -Pduration=120 gatlingRun \
+  --simulation com.example.bookserver.loadtest.BookTitleSearchDeepPageBreakPointSimulation \
+  --run-description "book-title-search_page-100_max-500_120s"
+```
+
+The deep feeder contains only terms known to have more than 2,200 matches in the seeded
+catalogue. That prevents an empty page from being mistaken for a cheap deep-OFFSET query.
+
 ## Mixed browsing profiles
 
 `BreakPointSimulation`, `LoadSimulation`, `StressSimulation`, `SpikeSimulation`, and
