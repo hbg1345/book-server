@@ -22,6 +22,7 @@ import com.example.bookserver.book.BlankSearchQueryException;
 import com.example.bookserver.book.BookNotFoundException;
 import com.example.bookserver.book.DuplicateIsbnException;
 import com.example.bookserver.book.InsufficientStockException;
+import com.example.bookserver.book.InvalidPageException;
 import com.example.bookserver.cart.CartItemNotFoundException;
 import com.example.bookserver.payment.PaymentAmountMismatchException;
 import com.example.bookserver.payment.PaymentIntentFailedException;
@@ -78,6 +79,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     /** A catalogue search with an empty query, which would match the whole catalogue. */
     @ExceptionHandler(BlankSearchQueryException.class)
     public ProblemDetail handleBlankSearchQuery(BlankSearchQueryException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** A negative search-result page. */
+    @ExceptionHandler(InvalidPageException.class)
+    public ProblemDetail handleInvalidPage(InvalidPageException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 

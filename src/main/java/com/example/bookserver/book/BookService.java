@@ -56,25 +56,40 @@ public class BookService {
         return book;
     }
 
-    /**
-     * How many hits a search may return. Fixed here rather than accepted from the caller:
-     * a client-supplied limit is a client-supplied response cost, and broad terms can match a
-     * large part of the catalogue. Paging belongs with the pagination this endpoint does not
-     * have yet.
-     */
-    public static final int SEARCH_LIMIT = 50;
+    /** A search page is fixed-size so callers cannot choose the response and database cost. */
+    public static final int SEARCH_PAGE_SIZE = 20;
+
+    private static final int NAVIGATION_PROBE_LIMIT =
+            SEARCH_PAGE_SIZE * BookPage.NAVIGATION_PAGE_COUNT + 1;
 
     /**
-     * Books whose title contains {@code title}, case-insensitively, newest first
-     * (bodies only, authors not fetched).
+     * One fixed-size page of books whose title contains {@code title}, case-insensitively,
+     * newest first (bodies only, authors not fetched).
+     *
+     * <p>The navigation probe counts at most 101 matches starting at this page: enough to know
+     * which of the next five page buttons exist and whether {@code >>} may move to the next
+     * block. It deliberately does not count every matching book.
      *
      * @throws BlankSearchQueryException if the query is empty or only whitespace
+     * @throws InvalidPageException if the page is negative
      */
-    public List<Book> search(String title) {
+    public BookPage search(String title, int page) {
         if (title == null || title.isBlank()) {
             throw new BlankSearchQueryException();
         }
-        return bookMapper.searchByTitle(title.trim(), SEARCH_LIMIT);
+        if (page < 0) {
+            throw new InvalidPageException("page must be zero or greater");
+        }
+
+        String normalizedTitle = title.trim();
+        long offset = (long) page * SEARCH_PAGE_SIZE;
+        List<Book> content = bookMapper.searchByTitle(
+                normalizedTitle, offset, SEARCH_PAGE_SIZE);
+        int navigationElements = content.size() < SEARCH_PAGE_SIZE
+                ? content.size()
+                : bookMapper.countSearchWindow(
+                        normalizedTitle, offset, NAVIGATION_PROBE_LIMIT);
+        return new BookPage(content, page, SEARCH_PAGE_SIZE, navigationElements);
     }
 
     /**

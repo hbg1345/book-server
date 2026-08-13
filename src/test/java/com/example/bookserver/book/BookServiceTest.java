@@ -281,9 +281,13 @@ public class BookServiceTest {
         createTitled("Clean Architecture");
         createTitled("Refactoring");
 
-        assertThat(bookService.search("clean"))
+        BookPage result = bookService.search("clean", 0);
+
+        assertThat(result.content())
                 .extracting(Book::getBookTitle)
                 .containsExactlyInAnyOrder("Clean Code", "Clean Architecture");
+        assertThat(result.visiblePages()).containsExactly(0);
+        assertThat(result.nextBlockPage()).isNull();
     }
 
     // Surrounding whitespace is the client's, not the user's intent: a query pasted with a
@@ -292,7 +296,7 @@ public class BookServiceTest {
     void search_ignoresSurroundingWhitespace() {
         createTitled("Clean Code");
 
-        assertThat(bookService.search("  clean  "))
+        assertThat(bookService.search("  clean  ", 0).content())
                 .extracting(Book::getBookTitle)
                 .containsExactly("Clean Code");
     }
@@ -303,20 +307,63 @@ public class BookServiceTest {
     void search_rejectsBlankQuery() {
         createTitled("Clean Code");
 
-        assertThatThrownBy(() -> bookService.search("   "))
+        assertThatThrownBy(() -> bookService.search("   ", 0))
                 .isInstanceOf(BlankSearchQueryException.class);
-        assertThatThrownBy(() -> bookService.search(""))
+        assertThatThrownBy(() -> bookService.search("", 0))
                 .isInstanceOf(BlankSearchQueryException.class);
+    }
+
+    @Test
+    void search_rejectsNegativePage() {
+        assertThatThrownBy(() -> bookService.search("clean", -1))
+                .isInstanceOf(InvalidPageException.class);
     }
 
     // The service, not the caller, decides how many rows a search may return, so no client
     // can ask for the whole catalogue by omitting a limit.
     @Test
     void search_capsResultsAtTheDefaultLimit() {
-        for (int i = 0; i < BookService.SEARCH_LIMIT + 5; i++) {
+        for (int i = 0; i < BookService.SEARCH_PAGE_SIZE + 5; i++) {
             createTitled("Clean Code volume " + i);
         }
 
-        assertThat(bookService.search("clean")).hasSize(BookService.SEARCH_LIMIT);
+        assertThat(bookService.search("clean", 0).content())
+                .hasSize(BookService.SEARCH_PAGE_SIZE);
+    }
+
+    // Page numbers have no product cap: each page still returns only twenty records.
+    @Test
+    void search_returnsTheRequestedPage() {
+        for (int i = 0; i < BookService.SEARCH_PAGE_SIZE + 3; i++) {
+            createTitled("Clean Code volume " + i);
+        }
+
+        BookPage first = bookService.search("clean", 0);
+        BookPage second = bookService.search("clean", 1);
+
+        assertThat(first.content()).hasSize(BookService.SEARCH_PAGE_SIZE);
+        assertThat(second.content()).hasSize(3);
+        assertThat(second.content())
+                .extracting(Book::getBookUuid)
+                .doesNotContainAnyElementsOf(
+                        first.content().stream().map(Book::getBookUuid).toList());
+    }
+
+    // Five numeric buttons are exposed, and the 101st row enables >> to page index 5.
+    @Test
+    void search_buildsNavigationWithoutAnExactTotalCount() {
+        int books = BookService.SEARCH_PAGE_SIZE * BookPage.NAVIGATION_PAGE_COUNT + 1;
+        for (int i = 0; i < books; i++) {
+            createTitled("Clean Code volume " + i);
+        }
+
+        BookPage firstBlock = bookService.search("clean", 0);
+        BookPage lastPage = bookService.search("clean", 5);
+
+        assertThat(firstBlock.visiblePages()).containsExactly(0, 1, 2, 3, 4);
+        assertThat(firstBlock.nextBlockPage()).isEqualTo(5);
+        assertThat(lastPage.content()).hasSize(1);
+        assertThat(lastPage.visiblePages()).containsExactly(5);
+        assertThat(lastPage.nextBlockPage()).isNull();
     }
 }

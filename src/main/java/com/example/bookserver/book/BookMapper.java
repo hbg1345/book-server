@@ -45,17 +45,39 @@ public interface BookMapper {
     // caller so that every caller gets it, not only the one that remembers.
     //
     // The trigram GIN index accelerates this predicate, but a broad term can still match much
-    // of the ~103k-row catalogue. Keeping the limit in SQL avoids fetching and serialising all
-    // of those matches only to trim them in Java.
+    // of the ~103k-row catalogue. LIMIT and OFFSET keep each response to one page.
     @Select("""
             SELECT * FROM book
             WHERE book_title ILIKE '%' ||
                   replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
                   || '%' ESCAPE '\\'
             ORDER BY book_uuid DESC
+            OFFSET #{offset}
             LIMIT #{limit}
             """)
-    List<Book> searchByTitle(@Param("title") String title, @Param("limit") int limit);
+    List<Book> searchByTitle(@Param("title") String title,
+                             @Param("offset") long offset,
+                             @Param("limit") int limit);
+
+    // Bounded look-ahead for numeric navigation. This is not a count of every search hit: the
+    // inner query stops after the five visible pages plus one row. The extra row is enough to
+    // decide whether the client should render >> for the next block.
+    @Select("""
+            SELECT COUNT(*)
+            FROM (
+                SELECT 1
+                FROM book
+                WHERE book_title ILIKE '%' ||
+                      replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+                      || '%' ESCAPE '\\'
+                ORDER BY book_uuid DESC
+                OFFSET #{offset}
+                LIMIT #{limit}
+            ) navigation_window
+            """)
+    int countSearchWindow(@Param("title") String title,
+                          @Param("offset") long offset,
+                          @Param("limit") int limit);
 
     // book plus its authors, assembled via the nested @Many query
     @Select("SELECT * FROM book WHERE book_uuid = #{bookUuid}")

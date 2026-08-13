@@ -17,7 +17,7 @@ Interactive docs (Swagger UI, generated from the tests and published on every pu
 |------|-----------|------|
 | Auth | `POST /api/auth/login` · `refresh` · `logout` | public |
 | Users | `POST /api/users` (sign up) · `GET/PUT /api/users/me` · `PUT /api/users/me/password` · `DELETE /api/users/me` | bearer (except sign-up) |
-| Books | `GET /api/books?title=…` · `GET /api/books/{uuid}` (public) · `POST/PUT/DELETE` | reads public; writes **admin** |
+| Books | `GET /api/books?title=…&page=0` (20/search page) · `GET /api/books/{uuid}` (public) · `POST/PUT/DELETE` | reads public; writes **admin** |
 | Authors | `GET /api/authors?name=` (public) · `POST /api/authors` | reads public; writes **admin** |
 | Cart | `GET /api/cart` · `POST /api/cart/items` · `PUT/DELETE /api/cart/items/{bookUuid}` | bearer |
 | Orders | `POST /api/orders` · `GET /api/orders` · `GET /api/orders/{uuid}` · `POST .../payment-intent` · `POST .../cancel` | bearer |

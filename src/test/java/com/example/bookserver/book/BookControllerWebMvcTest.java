@@ -196,22 +196,32 @@ class BookControllerWebMvcTest {
     void search_returnsMatchingBooks() throws Exception {
         Book book = new Book(UUID.randomUUID(), Isbns.next(), "Clean Architecture", "desc",
                 new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, null);
-        when(bookService.search("clean")).thenReturn(List.of(book));
+        when(bookService.search("clean", 0))
+                .thenReturn(new BookPage(List.of(book), 0, 20, 1));
 
-        mockMvc.perform(get("/api/books").param("title", "clean"))
+        mockMvc.perform(get("/api/books")
+                        .param("title", "clean")
+                        .param("page", "0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].bookTitle").value("Clean Architecture"))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.visiblePages[0]").value(0))
+                .andExpect(jsonPath("$.nextBlockPage").isEmpty())
                 .andDo(document("book-search",
                         queryParameters(
                                 parameterWithName("title").description(
                                         "Required substring of the book title to search for, "
-                                                + "case-insensitive."))));
+                                                + "case-insensitive."),
+                                parameterWithName("page").optional().description(
+                                        "Zero-based result page; defaults to 0. Each page "
+                                                + "contains at most 20 books."))));
     }
 
     // a blank title is a search with nothing to search for -> 400, not the whole catalogue
     @Test
     void search_returns400_whenTitleBlank() throws Exception {
-        when(bookService.search("  ")).thenThrow(new BlankSearchQueryException());
+        when(bookService.search("  ", 0)).thenThrow(new BlankSearchQueryException());
 
         mockMvc.perform(get("/api/books").param("title", "  "))
                 .andExpect(status().isBadRequest());
@@ -221,10 +231,22 @@ class BookControllerWebMvcTest {
     // reads stay public: search needs no token
     @Test
     void search_isPublic_whenAnonymous() throws Exception {
-        when(bookService.search("clean")).thenReturn(List.of());
+        when(bookService.search("clean", 0))
+                .thenReturn(new BookPage(List.of(), 0, 20, 0));
 
         mockMvc.perform(get("/api/books").param("title", "clean"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void search_returns400_whenPageIsNegative() throws Exception {
+        when(bookService.search("clean", -1))
+                .thenThrow(new InvalidPageException("page must be zero or greater"));
+
+        mockMvc.perform(get("/api/books")
+                        .param("title", "clean")
+                        .param("page", "-1"))
+                .andExpect(status().isBadRequest());
     }
 
     // update: delegates to the service with the path uuid and parsed body
@@ -346,6 +368,6 @@ class BookControllerWebMvcTest {
         mockMvc.perform(get("/api/books"))
                 .andExpect(status().isBadRequest());
 
-        verify(bookService, never()).search(any());
+        verify(bookService, never()).search(any(), anyInt());
     }
 }

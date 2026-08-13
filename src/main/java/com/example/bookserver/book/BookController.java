@@ -1,6 +1,5 @@
 package com.example.bookserver.book;
 
-import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -48,13 +47,13 @@ public class BookController {
     /**
      * Search the catalogue by title. An unfiltered read is deliberately not exposed: readers
      * discover books through search and then open a detail, rather than walking the entire
-     * catalogue. Search is currently capped to one result page (see
-     * {@link BookService#SEARCH_LIMIT}).
+     * catalogue. Results are returned in fixed-size pages; the client cannot increase the
+     * response cost by supplying its own page size.
      */
     @GetMapping
-    public BookPageResponse search(@RequestParam String title) {
-        List<Book> hits = bookService.search(title);
-        return BookPageResponse.from(new BookPage(hits, 0, Math.max(hits.size(), 1), hits.size()));
+    public BookPageResponse search(@RequestParam String title,
+                                   @RequestParam(defaultValue = "0") int page) {
+        return BookPageResponse.from(bookService.search(title, page));
     }
 
     @GetMapping("/{bookUuid}")

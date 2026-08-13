@@ -205,7 +205,9 @@ class BookControllerIntegrationTest {
         mockMvc.perform(get("/api/books").param("title", "clean"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(1))
-                .andExpect(jsonPath("$.content[0].bookUuid").value(cleanCode));
+                .andExpect(jsonPath("$.content[0].bookUuid").value(cleanCode))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.visiblePages[0]").value(0));
 
         // There is no unfiltered catalogue read; omitting title is an invalid request.
         mockMvc.perform(get("/api/books"))

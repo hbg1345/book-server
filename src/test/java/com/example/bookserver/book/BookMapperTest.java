@@ -6,6 +6,7 @@ import com.example.bookserver.common.Uuids;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -231,7 +232,7 @@ public class BookMapperTest {
         insertTitled("The Unclean Truth");
         insertTitled("Refactoring");
 
-        assertThat(bookMapper.searchByTitle("clean", 50))
+        assertThat(bookMapper.searchByTitle("clean", 0, 50))
                 .extracting(Book::getBookTitle)
                 .containsExactlyInAnyOrder("Clean Code", "The Unclean Truth");
     }
@@ -245,10 +246,10 @@ public class BookMapperTest {
         insertTitled("100% Pure Java");
         insertTitled("1000 Ideas");
 
-        assertThat(bookMapper.searchByTitle("%", 50))
+        assertThat(bookMapper.searchByTitle("%", 0, 50))
                 .extracting(Book::getBookTitle)
                 .containsExactly("100% Pure Java");
-        assertThat(bookMapper.searchByTitle("100_", 50)).isEmpty();
+        assertThat(bookMapper.searchByTitle("100_", 0, 50)).isEmpty();
     }
 
     // Verifies: the limit is applied by the query rather than by the caller trimming the
@@ -260,7 +261,7 @@ public class BookMapperTest {
         insertTitled("Clean Architecture");
         insertTitled("Clean Agile");
 
-        assertThat(bookMapper.searchByTitle("Clean", 2)).hasSize(2);
+        assertThat(bookMapper.searchByTitle("Clean", 0, 2)).hasSize(2);
     }
 
     // Verifies: no match is an empty list, not null — callers should not have to null-check.
@@ -268,7 +269,34 @@ public class BookMapperTest {
     void searchByTitle_returnsEmpty_whenNothingMatches() {
         insertTitled("Clean Code");
 
-        assertThat(bookMapper.searchByTitle("Nonexistent", 50)).isEmpty();
+        assertThat(bookMapper.searchByTitle("Nonexistent", 0, 50)).isEmpty();
+    }
+
+    // OFFSET selects a later result page without changing the fixed result order.
+    @Test
+    void searchByTitle_appliesOffset() {
+        insertTitled("Clean Code");
+        insertTitled("Clean Architecture");
+        insertTitled("Clean Agile");
+
+        List<Book> firstTwo = bookMapper.searchByTitle("Clean", 0, 2);
+        List<Book> third = bookMapper.searchByTitle("Clean", 2, 2);
+
+        assertThat(firstTwo).hasSize(2);
+        assertThat(third).hasSize(1);
+        assertThat(third.get(0).getBookUuid())
+                .isNotIn(firstTwo.stream().map(Book::getBookUuid).toList());
+    }
+
+    // The navigation query counts only its bounded window, never every matching row.
+    @Test
+    void countSearchWindow_stopsAtTheLimit() {
+        for (int i = 0; i < 7; i++) {
+            insertTitled("Clean Code volume " + i);
+        }
+
+        assertThat(bookMapper.countSearchWindow("Clean", 0, 5)).isEqualTo(5);
+        assertThat(bookMapper.countSearchWindow("Clean", 5, 5)).isEqualTo(2);
     }
 
 }
