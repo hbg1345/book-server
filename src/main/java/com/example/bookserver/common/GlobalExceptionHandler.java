@@ -82,7 +82,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
-    /** A page request the catalogue will not serve: negative, too large, or too deep. */
+    /** A negative search-result page. */
     @ExceptionHandler(InvalidPageException.class)
     public ProblemDetail handleInvalidPage(InvalidPageException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());

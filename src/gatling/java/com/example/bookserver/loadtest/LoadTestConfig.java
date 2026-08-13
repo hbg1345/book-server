@@ -86,17 +86,17 @@ public final class LoadTestConfig {
     public static final boolean SHARE_CONNECTIONS =
             !"false".equalsIgnoreCase(System.getProperty("shareConnections", "true"));
 
+    /** Page used by the deep-OFFSET comparison; 100 means OFFSET 2,000 at 20 rows per page. */
+    public static final int SEARCH_DEEP_PAGE = nonNegativeIntProp("searchDeepPage", 100);
+
     /**
      * Default catalogue-browsing mix. These are placeholders until production access logs can
-     * supply observed ratios: 30% page through the catalogue, 20% search by title, and the
-     * remaining 50% open a book detail page.
+     * supply observed ratios: 50% search by title and the remaining 50% open a book detail page.
      *
      * <p>The endpoint-specific simulations bypass these values entirely. They only shape the
      * mixed Load/Stress/Spike/Endurance and catalogue breakpoint profiles.
      */
-    public static final double BOOK_LIST_PCT = percentage("bookListPct", 30);
-
-    public static final double TITLE_SEARCH_PCT = percentage("titleSearchPct", 20);
+    public static final double TITLE_SEARCH_PCT = percentage("titleSearchPct", 50);
 
     public static final double BOOK_DETAIL_PCT = detailPercentage();
 
@@ -114,18 +114,20 @@ public final class LoadTestConfig {
     }
 
     private static double detailPercentage() {
-        double detail = 100 - BOOK_LIST_PCT - TITLE_SEARCH_PCT;
-        if (detail < 0) {
-            throw new IllegalArgumentException(
-                    "bookListPct + titleSearchPct must not exceed 100, got "
-                            + (BOOK_LIST_PCT + TITLE_SEARCH_PCT));
-        }
-        return detail;
+        return 100 - TITLE_SEARCH_PCT;
     }
 
     public static int intProp(String key, int fallback) {
         String raw = System.getProperty(key);
         return raw == null || raw.isBlank() ? fallback : Integer.parseInt(raw.trim());
+    }
+
+    private static int nonNegativeIntProp(String key, int fallback) {
+        int value = intProp(key, fallback);
+        if (value < 0) {
+            throw new IllegalArgumentException(key + " must be zero or greater, got " + value);
+        }
+        return value;
     }
 
     /** Reads {@code key} as a number of seconds, falling back to {@code fallbackSeconds}. */

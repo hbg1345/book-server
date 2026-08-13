@@ -10,13 +10,6 @@ Run these from a separate load-generator machine for measurements. Running Gatli
 PostgreSQL on one laptop is useful only as a script smoke test.
 
 ```bash
-# Paginated catalogue list
-JAVA_HOME=$(/usr/libexec/java_home -v 17) bash gradlew \
-  -PbaseUrl=http://localhost:8080 -PmaxUsers=500 -Pduration=120 \
-  gatlingRun \
-  --simulation com.example.bookserver.loadtest.BookListBreakPointSimulation \
-  --run-description "book-list_max-500_120s"
-
 # Title search
 JAVA_HOME=$(/usr/libexec/java_home -v 17) bash gradlew \
   -PbaseUrl=http://localhost:8080 -PmaxUsers=500 -Pduration=120 \
@@ -36,26 +29,47 @@ If latency and error rate are still flat at 500, raise `-PmaxUsers`. If they ben
 500, the existing range is sufficient; report the throughput and p95/p99 at the bend rather than
 only the virtual-user count.
 
+## Search page-depth comparison
+
+These two simulations use the same broad search-term feeder and load shape. The first requests
+page 0; the second requests page 100 by default (20 books per page, so PostgreSQL skips 2,000
+matches). Run them against the same deployed revision with the same properties.
+
+```bash
+# Page 0 baseline
+JAVA_HOME=$(/usr/libexec/java_home -v 17) bash gradlew \
+  -PmaxUsers=500 -Pduration=120 gatlingRun \
+  --simulation com.example.bookserver.loadtest.BookTitleSearchFirstPageBreakPointSimulation \
+  --run-description "book-title-search_page-0_max-500_120s"
+
+# Deep page; override -PsearchDeepPage to test a different depth
+JAVA_HOME=$(/usr/libexec/java_home -v 17) bash gradlew \
+  -PsearchDeepPage=100 -PmaxUsers=500 -Pduration=120 gatlingRun \
+  --simulation com.example.bookserver.loadtest.BookTitleSearchDeepPageBreakPointSimulation \
+  --run-description "book-title-search_page-100_max-500_120s"
+```
+
+The deep feeder contains only terms known to have more than 2,200 matches in the seeded
+catalogue. That prevents an empty page from being mistaken for a cheap deep-OFFSET query.
+
 ## Mixed browsing profiles
 
 `BreakPointSimulation`, `LoadSimulation`, `StressSimulation`, `SpikeSimulation`, and
 `EnduranceSimulation` use the same configurable browsing mix:
 
-- 30% `GET /api/books?page=…&size=20`
-- 20% `GET /api/books?title=…`
+- 50% `GET /api/books?title=…`
 - 50% `GET /api/books/{bookUuid}`
 
-Override the first two percentages with `-PbookListPct` and `-PtitleSearchPct`; detail receives
-the remainder. The two configured values must not add up to more than 100.
+Override the search percentage with `-PtitleSearchPct`; detail receives the remainder.
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 17) bash gradlew \
   -PbaseUrl=http://localhost:8080 \
-  -PbookListPct=30 -PtitleSearchPct=20 \
+  -PtitleSearchPct=50 \
   -PmaxUsers=500 -Pduration=120 \
   gatlingRun \
   --simulation com.example.bookserver.loadtest.BreakPointSimulation \
-  --run-description "catalog-mixed_30-list_20-search_50-detail_max-500"
+  --run-description "catalog-mixed_50-search_50-detail_max-500"
 ```
 
 HTML reports are written below `build/reports/gatling`.

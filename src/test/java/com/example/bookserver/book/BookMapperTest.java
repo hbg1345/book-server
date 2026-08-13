@@ -6,6 +6,7 @@ import com.example.bookserver.common.Uuids;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -148,23 +149,6 @@ public class BookMapperTest {
                 .containsExactlyInAnyOrder("Robert Martin", "John Doe");
     }
 
-    // 3b. findAll — empty table, then all inserted book bodies
-    // Verifies: findAll returns nothing on an empty table and every inserted
-    // book afterwards (authors not fetched by the list query).
-    @Test
-    void findAll_returnsAllBooks() {
-        assertThat(bookMapper.findAll()).isEmpty();
-
-        UUID id1 = Uuids.newId();
-        UUID id2 = Uuids.newId();
-        bookMapper.insert(sampleBook(id1));
-        bookMapper.insert(sampleBook(id2));
-
-        assertThat(bookMapper.findAll())
-                .extracting(Book::getBookUuid)
-                .containsExactlyInAnyOrder(id1, id2);
-    }
-
     // 3c. unlinkAuthors — removes the join rows only
     // Verifies: unlinkAuthors drops every author link for the book while leaving
     // the book itself (and the author rows) intact.
@@ -248,7 +232,7 @@ public class BookMapperTest {
         insertTitled("The Unclean Truth");
         insertTitled("Refactoring");
 
-        assertThat(bookMapper.searchByTitle("clean", 50))
+        assertThat(bookMapper.searchByTitle("clean", 0, 50))
                 .extracting(Book::getBookTitle)
                 .containsExactlyInAnyOrder("Clean Code", "The Unclean Truth");
     }
@@ -262,10 +246,10 @@ public class BookMapperTest {
         insertTitled("100% Pure Java");
         insertTitled("1000 Ideas");
 
-        assertThat(bookMapper.searchByTitle("%", 50))
+        assertThat(bookMapper.searchByTitle("%", 0, 50))
                 .extracting(Book::getBookTitle)
                 .containsExactly("100% Pure Java");
-        assertThat(bookMapper.searchByTitle("100_", 50)).isEmpty();
+        assertThat(bookMapper.searchByTitle("100_", 0, 50)).isEmpty();
     }
 
     // Verifies: the limit is applied by the query rather than by the caller trimming the
@@ -277,7 +261,7 @@ public class BookMapperTest {
         insertTitled("Clean Architecture");
         insertTitled("Clean Agile");
 
-        assertThat(bookMapper.searchByTitle("Clean", 2)).hasSize(2);
+        assertThat(bookMapper.searchByTitle("Clean", 0, 2)).hasSize(2);
     }
 
     // Verifies: no match is an empty list, not null — callers should not have to null-check.
@@ -285,45 +269,34 @@ public class BookMapperTest {
     void searchByTitle_returnsEmpty_whenNothingMatches() {
         insertTitled("Clean Code");
 
-        assertThat(bookMapper.searchByTitle("Nonexistent", 50)).isEmpty();
+        assertThat(bookMapper.searchByTitle("Nonexistent", 0, 50)).isEmpty();
     }
 
-    // 6. paging
-    // Verifies: a page is a window onto the same newest-first order findAll uses, and the
-    // window moves by offset. book_uuid is UUIDv7, so DESC is newest-first and the order is
-    // stable across calls — without that a "page 2" would not be a page of anything.
+    // OFFSET selects a later result page without changing the fixed result order.
     @Test
-    void findPage_returnsTheRequestedWindow_newestFirst() {
-        UUID first = insertTitled("First");
-        UUID second = insertTitled("Second");
-        UUID third = insertTitled("Third");
+    void searchByTitle_appliesOffset() {
+        insertTitled("Clean Code");
+        insertTitled("Clean Architecture");
+        insertTitled("Clean Agile");
 
-        assertThat(bookMapper.findPage(2, 0))
-                .extracting(Book::getBookUuid)
-                .containsExactly(third, second);
-        assertThat(bookMapper.findPage(2, 2))
-                .extracting(Book::getBookUuid)
-                .containsExactly(first);
+        List<Book> firstTwo = bookMapper.searchByTitle("Clean", 0, 2);
+        List<Book> third = bookMapper.searchByTitle("Clean", 2, 2);
+
+        assertThat(firstTwo).hasSize(2);
+        assertThat(third).hasSize(1);
+        assertThat(third.get(0).getBookUuid())
+                .isNotIn(firstTwo.stream().map(Book::getBookUuid).toList());
     }
 
-    // Verifies: an offset past the end is an empty page, not an error — asking for page 99 of
-    // a three-book catalogue is a normal thing for a client to do.
+    // The navigation query counts only its bounded window, never every matching row.
     @Test
-    void findPage_returnsEmpty_pastTheEnd() {
-        insertTitled("Only");
+    void countSearchWindow_stopsAtTheLimit() {
+        for (int i = 0; i < 7; i++) {
+            insertTitled("Clean Code volume " + i);
+        }
 
-        assertThat(bookMapper.findPage(20, 100)).isEmpty();
+        assertThat(bookMapper.countSearchWindow("Clean", 0, 5)).isEqualTo(5);
+        assertThat(bookMapper.countSearchWindow("Clean", 5, 5)).isEqualTo(2);
     }
 
-    // Verifies: countAll reports the size of the whole table, not of the current page —
-    // it is what tells the client how many pages exist.
-    @Test
-    void countAll_countsEveryBook() {
-        assertThat(bookMapper.countAll()).isZero();
-
-        insertTitled("One");
-        insertTitled("Two");
-
-        assertThat(bookMapper.countAll()).isEqualTo(2);
-    }
 }

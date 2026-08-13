@@ -9,7 +9,7 @@ import com.example.bookserver.book.Book;
 
 /**
  * Book view returned to the client. {@code authors} is populated on the detail read
- * (GET /api/books/{uuid}); on the list read it is an empty list (authors not fetched).
+ * (GET /api/books/{uuid}); on search results it is an empty list (authors not fetched).
  */
 public record BookResponse(
         UUID bookUuid,

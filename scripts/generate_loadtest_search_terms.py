@@ -36,15 +36,25 @@ def search_term(title: str, book_uuid: str) -> str:
     return candidates[int(book_uuid.replace("-", "")[-8:], 16) % len(candidates)]
 
 
+def search_band(match_count: int) -> str:
+    if match_count <= 10:
+        return "rare"
+    if match_count <= 100:
+        return "medium"
+    return "common"
+
+
 def main() -> None:
     with BOOK_UUIDS.open(newline="", encoding="utf-8") as source:
         ordered_uuids = [row["bookUuid"] for row in csv.DictReader(source)]
 
     wanted = set(ordered_uuids)
     titles: dict[str, str] = {}
+    normalized_titles: list[str] = []
     with gzip.open(BOOK_SEED, mode="rt", newline="", encoding="utf-8") as source:
         for row in csv.DictReader(source):
             book_uuid = row["book_uuid"]
+            normalized_titles.append(row["book_title"].casefold())
             if book_uuid in wanted:
                 titles[book_uuid] = row["book_title"]
 
@@ -52,11 +62,30 @@ def main() -> None:
     if missing:
         raise ValueError(f"{len(missing)} Gatling book UUID(s) are absent from the seed")
 
+    # Keep the existing 2,000 rows, their order, and their duplicates intact so old and new
+    # aggregate reports exercise the same workload. The extra fields only let Gatling split the
+    # same requests by result cardinality. Terms contain no LIKE wildcards, so a case-folded
+    # substring count matches the query's escaped ILIKE predicate for this feeder.
+    terms = [search_term(titles[book_uuid], book_uuid) for book_uuid in ordered_uuids]
+    match_counts = {
+        normalized_term: sum(normalized_term in title for title in normalized_titles)
+        for normalized_term in {term.casefold() for term in terms}
+    }
+
     with OUTPUT.open(mode="w", newline="", encoding="utf-8") as target:
-        writer = csv.DictWriter(target, fieldnames=["bookSearchTerm"])
+        writer = csv.DictWriter(
+            target,
+            fieldnames=["bookSearchTerm", "searchBand", "matchCount"],
+            lineterminator="\n",
+        )
         writer.writeheader()
-        for book_uuid in ordered_uuids:
-            writer.writerow({"bookSearchTerm": search_term(titles[book_uuid], book_uuid)})
+        for term in terms:
+            match_count = match_counts[term.casefold()]
+            writer.writerow({
+                "bookSearchTerm": term,
+                "searchBand": search_band(match_count),
+                "matchCount": match_count,
+            })
 
     print(f"wrote {len(ordered_uuids)} title search terms to {OUTPUT.relative_to(ROOT)}")
 

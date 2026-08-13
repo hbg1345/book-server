@@ -34,35 +34,6 @@ public interface BookMapper {
     @Select("SELECT * FROM book WHERE book_uuid = #{bookUuid}")
     Book findById(UUID bookUuid);
 
-    // list view: book bodies only (authors not fetched to avoid N+1), newest first.
-    // book_uuid is UUIDv7 (time-ordered), so DESC ≈ most-recently-created first.
-    @Select("SELECT * FROM book ORDER BY book_uuid DESC")
-    List<Book> findAll();
-
-    // One page of the same newest-first list.
-    //
-    // The ORDER BY is what makes a page mean anything: without a total order the database may
-    // return rows in any order it likes, and "the next 20" would overlap or skip rows at random.
-    // book_uuid is UUIDv7 and therefore time-ordered, so DESC is newest-first and costs nothing
-    // extra — the primary key index already provides it.
-    //
-    // OFFSET does not skip rows, it reads and discards them, so a deep page pays for every row
-    // before it. The caller is expected to bound how deep it will go (see BookService.MAX_PAGE);
-    // this method does not police that, it just does what it is asked.
-    @Select("""
-            SELECT * FROM book
-            ORDER BY book_uuid DESC
-            LIMIT #{limit} OFFSET #{offset}
-            """)
-    List<Book> findPage(@Param("limit") int limit, @Param("offset") int offset);
-
-    // How many books there are, for the page count the client shows. A separate statement
-    // rather than a window function over the page: counting inside the paged query makes the
-    // database compute the total for every row it returns, and the total does not change with
-    // the page.
-    @Select("SELECT count(*) FROM book")
-    long countAll();
-
     // Title search: substring match, case-insensitive, newest first (book_uuid is UUIDv7).
     //
     // The nested replace() escapes the LIKE wildcards out of the user's text before it is
@@ -73,18 +44,40 @@ public interface BookMapper {
     // escaping keeps the result equal to what was typed, and lives here rather than in the
     // caller so that every caller gets it, not only the one that remembers.
     //
-    // The limit is part of the query for the same reason: the catalogue holds ~103k rows and
-    // this predicate cannot use an index, so trimming in Java would still have paid for the
-    // full scan and the full transfer.
+    // The trigram GIN index accelerates this predicate, but a broad term can still match much
+    // of the ~103k-row catalogue. LIMIT and OFFSET keep each response to one page.
     @Select("""
             SELECT * FROM book
             WHERE book_title ILIKE '%' ||
                   replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
                   || '%' ESCAPE '\\'
             ORDER BY book_uuid DESC
+            OFFSET #{offset}
             LIMIT #{limit}
             """)
-    List<Book> searchByTitle(@Param("title") String title, @Param("limit") int limit);
+    List<Book> searchByTitle(@Param("title") String title,
+                             @Param("offset") long offset,
+                             @Param("limit") int limit);
+
+    // Bounded look-ahead for numeric navigation. This is not a count of every search hit: the
+    // inner query stops after the five visible pages plus one row. The extra row is enough to
+    // decide whether the client should render >> for the next block.
+    @Select("""
+            SELECT COUNT(*)
+            FROM (
+                SELECT 1
+                FROM book
+                WHERE book_title ILIKE '%' ||
+                      replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+                      || '%' ESCAPE '\\'
+                ORDER BY book_uuid DESC
+                OFFSET #{offset}
+                LIMIT #{limit}
+            ) navigation_window
+            """)
+    int countSearchWindow(@Param("title") String title,
+                          @Param("offset") long offset,
+                          @Param("limit") int limit);
 
     // book plus its authors, assembled via the nested @Many query
     @Select("SELECT * FROM book WHERE book_uuid = #{bookUuid}")
