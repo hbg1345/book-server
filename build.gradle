@@ -138,7 +138,7 @@ tasks.register('benchmark', Test) {
 def loadTestProps = ['baseUrl', 'users', 'baselineUsers', 'spikeUsers', 'maxUsers',
                      'duration', 'rampUp', 'recovery', 'beforeSpike', 'spikeHold', 'afterSpike',
                      'thinkTime', 'thinkTimeMin', 'thinkTimeMax', 'warmupRequests',
-                     'bookListPct', 'titleSearchPct', 'shareConnections']
+                     'titleSearchPct', 'shareConnections']
         .findAll { project.hasProperty(it) }
         .collect { "-D${it}=${project.property(it)}".toString() }
 

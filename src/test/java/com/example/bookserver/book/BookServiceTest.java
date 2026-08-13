@@ -112,52 +112,6 @@ public class BookServiceTest {
                 .isInstanceOf(BookNotFoundException.class);
     }
 
-    // list returns a page of books, newest first, with the catalogue total alongside.
-    @Test
-    void list_returnsAPageWithTheTotal() {
-        createTitled("First");
-        createTitled("Second");
-        createTitled("Third");
-
-        BookPage page = bookService.list(0, 2);
-
-        assertThat(page.content()).extracting(Book::getBookTitle).containsExactly("Third", "Second");
-        assertThat(page.totalElements()).isEqualTo(3);   // the catalogue, not the page
-        assertThat(page.totalPages()).isEqualTo(2);      // 3 books at 2 per page
-    }
-
-    // The window moves with the page, and a page past the end is empty rather than an error.
-    @Test
-    void list_movesTheWindow_andEndsQuietly() {
-        createTitled("First");
-        createTitled("Second");
-        createTitled("Third");
-
-        assertThat(bookService.list(1, 2).content())
-                .extracting(Book::getBookTitle).containsExactly("First");
-        assertThat(bookService.list(9, 2).content()).isEmpty();
-    }
-
-    // The size is a promise about response bytes, so the caller may not name any number it
-    // likes — otherwise one request asks for the whole 103k-row catalogue.
-    @Test
-    void list_rejectsASizeOutsideTheAllowedRange() {
-        assertThatThrownBy(() -> bookService.list(0, 0))
-                .isInstanceOf(InvalidPageException.class);
-        assertThatThrownBy(() -> bookService.list(0, BookService.MAX_SIZE + 1))
-                .isInstanceOf(InvalidPageException.class);
-    }
-
-    // OFFSET reads and discards everything ahead of the window, so a deep page is the most
-    // expensive request the endpoint can take — and one no shopper makes.
-    @Test
-    void list_refusesToGoDeeperThanTheCap() {
-        assertThatThrownBy(() -> bookService.list(BookService.MAX_PAGE + 1, 20))
-                .isInstanceOf(InvalidPageException.class);
-        assertThatThrownBy(() -> bookService.list(-1, 20))
-                .isInstanceOf(InvalidPageException.class);
-    }
-
     // update rewrites every catalogue field and replaces the author links — and leaves stock,
     // which is not a catalogue field, exactly where it was.
     @Test

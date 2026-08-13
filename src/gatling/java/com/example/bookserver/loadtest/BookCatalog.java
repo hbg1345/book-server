@@ -19,12 +19,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Catalogue requests shared by every load profile. The application exposes three ordinary
- * reader actions: page through the catalogue, search by title, and open one book. Keeping those
- * actions here lets endpoint-only and mixed simulations exercise identical HTTP requests.
+ * Catalogue requests shared by every load profile. The application exposes two ordinary reader
+ * actions: search by title and open one book. Keeping those actions here lets endpoint-only and
+ * mixed simulations exercise identical HTTP requests.
  */
 public final class BookCatalog {
 
@@ -74,15 +73,6 @@ public final class BookCatalog {
         return csv("data/book_search_terms.csv").random();
     }
 
-    /** A normal catalogue page. Vary shallow pages so the test is not one permanently hot key. */
-    private static ChainBuilder listBooks() {
-        return exec(http("GET /api/books?page={page}&size=20")
-                .get("/api/books")
-                .queryParam("page", session -> ThreadLocalRandom.current().nextInt(0, 20))
-                .queryParam("size", 20)
-                .check(status().is(200)));
-    }
-
     /** The indexed book lookup used after a reader selects a result. */
     private static ChainBuilder openBookDetail() {
         return feed(bookUuids())
@@ -105,14 +95,6 @@ public final class BookCatalog {
                         .get("/api/books")
                         .queryParam("title", "#{bookSearchTerm}")
                         .check(status().is(200)));
-    }
-
-    public static ScenarioBuilder bookListScenario(String name) {
-        return bookListScenario(name, LoadTestConfig.THINK_TIME_MIN, LoadTestConfig.THINK_TIME_MAX);
-    }
-
-    public static ScenarioBuilder bookListScenario(String name, Duration pauseMin, Duration pauseMax) {
-        return scenario(name).exec(listBooks()).pause(pauseMin, pauseMax);
     }
 
     public static ScenarioBuilder titleSearchScenario(String name) {
@@ -138,12 +120,11 @@ public final class BookCatalog {
 
     /**
      * One virtual user's action, selected from the catalogue mix, followed by a reading pause.
-     * Defaults to 30% list, 20% title search, and 50% detail. The endpoint-only simulations are
-     * the right tool for isolated capacity; this mix is for shared-resource contention.
+     * Defaults to 50% title search and 50% detail. The endpoint-only simulations are the right
+     * tool for isolated capacity; this mix is for shared-resource contention.
      */
     public static ScenarioBuilder browsingScenario(String name, Duration pauseMin, Duration pauseMax) {
         ChainBuilder reads = randomSwitch().on(
-                percent(LoadTestConfig.BOOK_LIST_PCT).then(listBooks()),
                 percent(LoadTestConfig.TITLE_SEARCH_PCT).then(searchBooksByTitle()),
                 percent(LoadTestConfig.BOOK_DETAIL_PCT).then(openBookDetail()));
 

@@ -10,13 +10,6 @@ Run these from a separate load-generator machine for measurements. Running Gatli
 PostgreSQL on one laptop is useful only as a script smoke test.
 
 ```bash
-# Paginated catalogue list
-JAVA_HOME=$(/usr/libexec/java_home -v 17) bash gradlew \
-  -PbaseUrl=http://localhost:8080 -PmaxUsers=500 -Pduration=120 \
-  gatlingRun \
-  --simulation com.example.bookserver.loadtest.BookListBreakPointSimulation \
-  --run-description "book-list_max-500_120s"
-
 # Title search
 JAVA_HOME=$(/usr/libexec/java_home -v 17) bash gradlew \
   -PbaseUrl=http://localhost:8080 -PmaxUsers=500 -Pduration=120 \
@@ -41,21 +34,19 @@ only the virtual-user count.
 `BreakPointSimulation`, `LoadSimulation`, `StressSimulation`, `SpikeSimulation`, and
 `EnduranceSimulation` use the same configurable browsing mix:
 
-- 30% `GET /api/books?page=…&size=20`
-- 20% `GET /api/books?title=…`
+- 50% `GET /api/books?title=…`
 - 50% `GET /api/books/{bookUuid}`
 
-Override the first two percentages with `-PbookListPct` and `-PtitleSearchPct`; detail receives
-the remainder. The two configured values must not add up to more than 100.
+Override the search percentage with `-PtitleSearchPct`; detail receives the remainder.
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 17) bash gradlew \
   -PbaseUrl=http://localhost:8080 \
-  -PbookListPct=30 -PtitleSearchPct=20 \
+  -PtitleSearchPct=50 \
   -PmaxUsers=500 -Pduration=120 \
   gatlingRun \
   --simulation com.example.bookserver.loadtest.BreakPointSimulation \
-  --run-description "catalog-mixed_30-list_20-search_50-detail_max-500"
+  --run-description "catalog-mixed_50-search_50-detail_max-500"
 ```
 
 HTML reports are written below `build/reports/gatling`.

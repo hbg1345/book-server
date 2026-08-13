@@ -89,7 +89,7 @@ class BookControllerIntegrationTest {
                 .andExpect(jsonPath("$.price").value(39.99))
                 .andExpect(jsonPath("$.authors[0].authorName").value("Robert Martin"));
 
-        mockMvc.perform(get("/api/books"))
+        mockMvc.perform(get("/api/books").param("title", "Clean Architecture"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].bookUuid").value(bookUuid));
 
@@ -173,8 +173,9 @@ class BookControllerIntegrationTest {
                         .content(body))
                 .andExpect(status().isConflict());
 
-        mockMvc.perform(get("/api/books"))
-                .andExpect(jsonPath("$.totalElements").value(1));
+        mockMvc.perform(get("/api/books").param("title", "Clean Architecture"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1));
     }
 
     /** Create a book through the API and return its uuid. */
@@ -206,11 +207,9 @@ class BookControllerIntegrationTest {
                 .andExpect(jsonPath("$.content.length()").value(1))
                 .andExpect(jsonPath("$.content[0].bookUuid").value(cleanCode));
 
-        // no filter still lists everything, so search did not replace the plain read
+        // There is no unfiltered catalogue read; omitting title is an invalid request.
         mockMvc.perform(get("/api/books"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content.length()").value(2))
-                .andExpect(jsonPath("$.totalElements").value(2));
+                .andExpect(status().isBadRequest());
 
         mockMvc.perform(get("/api/books").param("title", "   "))
                 .andExpect(status().isBadRequest());

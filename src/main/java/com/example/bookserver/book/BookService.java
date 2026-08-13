@@ -56,54 +56,17 @@ public class BookService {
         return book;
     }
 
-    /** Books per page when the client does not say. Twenty is a screenful, not a download. */
-    public static final int DEFAULT_SIZE = 20;
-
-    /**
-     * The largest page a client may ask for. A size is a promise about response bytes, and
-     * without a ceiling one request can ask for the whole 103k-row catalogue by naming it.
-     */
-    public static final int MAX_SIZE = 100;
-
-    /**
-     * The deepest page the catalogue will serve, counted from zero.
-     *
-     * <p>OFFSET does not skip rows, it reads and discards them, so page 5000 costs a hundred
-     * thousand rows to answer — the most expensive requests in the endpoint, and the ones no
-     * shopper makes. Real catalogues cap in the same place; past a hundred pages the traffic is
-     * crawlers. Anyone who genuinely wants something deeper wants a search, not page 5000.
-     */
-    public static final int MAX_PAGE = 99;
-
-    /**
-     * One page of books (bodies only, authors not fetched), newest first.
-     *
-     * @throws InvalidPageException if the page or size is outside what the catalogue serves
-     */
-    public BookPage list(int page, int size) {
-        if (page < 0) {
-            throw new InvalidPageException("page must not be negative: " + page);
-        }
-        if (page > MAX_PAGE) {
-            throw new InvalidPageException(
-                    "page must be at most " + MAX_PAGE + "; narrow the results instead: " + page);
-        }
-        if (size < 1 || size > MAX_SIZE) {
-            throw new InvalidPageException("size must be between 1 and " + MAX_SIZE + ": " + size);
-        }
-        return new BookPage(bookMapper.findPage(size, page * size), page, size, bookMapper.countAll());
-    }
-
     /**
      * How many hits a search may return. Fixed here rather than accepted from the caller:
-     * a client-supplied limit is a client-supplied cost, and the predicate scans the whole
-     * catalogue. Paging belongs with the pagination this endpoint does not have yet.
+     * a client-supplied limit is a client-supplied response cost, and broad terms can match a
+     * large part of the catalogue. Paging belongs with the pagination this endpoint does not
+     * have yet.
      */
     public static final int SEARCH_LIMIT = 50;
 
     /**
      * Books whose title contains {@code title}, case-insensitively, newest first
-     * (bodies only, authors not fetched — same shape as {@link #list()}).
+     * (bodies only, authors not fetched).
      *
      * @throws BlankSearchQueryException if the query is empty or only whitespace
      */

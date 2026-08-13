@@ -46,24 +46,15 @@ public class BookController {
     }
 
     /**
-     * The catalogue, one page at a time, optionally filtered. {@code ?title=} narrows the same
-     * collection resource rather than introducing a /search sub-resource: the thing being
-     * addressed is still the set of books, and a filtered set is not a different kind of thing.
-     *
-     * <p>The response shape does not change with the parameters — a client that asked for a
-     * page and a client that asked for a search parse the same thing. A search is served as a
-     * single page: it is capped rather than paged (see {@link BookService#SEARCH_LIMIT}), so
-     * its total is the hits returned and there is never a second page to fetch.
+     * Search the catalogue by title. An unfiltered read is deliberately not exposed: readers
+     * discover books through search and then open a detail, rather than walking the entire
+     * catalogue. Search is currently capped to one result page (see
+     * {@link BookService#SEARCH_LIMIT}).
      */
     @GetMapping
-    public BookPageResponse list(@RequestParam(required = false) String title,
-                                 @RequestParam(defaultValue = "0") int page,
-                                 @RequestParam(defaultValue = "" + BookService.DEFAULT_SIZE) int size) {
-        if (title != null) {
-            List<Book> hits = bookService.search(title);
-            return BookPageResponse.from(new BookPage(hits, 0, Math.max(hits.size(), 1), hits.size()));
-        }
-        return BookPageResponse.from(bookService.list(page, size));
+    public BookPageResponse search(@RequestParam String title) {
+        List<Book> hits = bookService.search(title);
+        return BookPageResponse.from(new BookPage(hits, 0, Math.max(hits.size(), 1), hits.size()));
     }
 
     @GetMapping("/{bookUuid}")
