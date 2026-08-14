@@ -237,6 +237,53 @@ public class BookMapperTest {
                 .containsExactlyInAnyOrder("Clean Code", "The Unclean Truth");
     }
 
+    // A complete title is stronger intent than a newer title which only contains it. The
+    // partial matches are inserted later so UUID-descending order would fail this assertion.
+    @Test
+    void searchByTitle_ranksAnExactTitleAheadOfNewerPartialMatches() {
+        insertTitled("Clean Code");
+        insertTitled("Clean Code Handbook");
+        insertTitled("Writing Clean Code Every Day");
+
+        assertThat(bookMapper.searchByTitle("Clean Code", 0, 50))
+                .extracting(Book::getBookTitle)
+                .first()
+                .isEqualTo("Clean Code");
+    }
+
+    // ILIKE alone cannot return this title because the misspelled text is not a substring.
+    @Test
+    void searchByTitle_recoversAOneCharacterTypo() {
+        insertTitled("Effective Java");
+        insertTitled("Java Performance");
+
+        assertThat(bookMapper.searchByTitle("Efective Java", 0, 50))
+                .extracting(Book::getBookTitle)
+                .containsExactly("Effective Java");
+    }
+
+    // A user need not reproduce punctuation printed on a cover to recover the book.
+    @Test
+    void searchByTitle_recoversPunctuationNormalization() {
+        insertTitled("Domain-Driven Design");
+
+        assertThat(bookMapper.searchByTitle("Domain Driven Design", 0, 50))
+                .extracting(Book::getBookTitle)
+                .containsExactly("Domain-Driven Design");
+    }
+
+    // Very short fuzzy terms are noisy and generate broad candidate sets. Literal matching
+    // remains available, but a different two-character title is not treated as a typo.
+    @Test
+    void searchByTitle_disablesFuzzyMatchingForShortQueries() {
+        insertTitled("AI");
+
+        assertThat(bookMapper.searchByTitle("AI", 0, 50))
+                .extracting(Book::getBookTitle)
+                .containsExactly("AI");
+        assertThat(bookMapper.searchByTitle("AJ", 0, 50)).isEmpty();
+    }
+
     // Verifies: LIKE wildcards typed by the user are matched literally. Without escaping,
     // a search for "%" would return the whole catalogue and "100_" would match "1000",
     // so the query would answer a question nobody asked.

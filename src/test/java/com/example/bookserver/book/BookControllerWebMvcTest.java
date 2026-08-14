@@ -211,8 +211,8 @@ class BookControllerWebMvcTest {
                 .andDo(document("book-search",
                         queryParameters(
                                 parameterWithName("title").description(
-                                        "Required substring of the book title to search for, "
-                                                + "case-insensitive."),
+                                        "Required book-title query. Results are case-insensitive, "
+                                                + "typo-tolerant, and ordered by relevance."),
                                 parameterWithName("page").optional().description(
                                         "Zero-based result page; defaults to 0. Each page "
                                                 + "contains at most 20 books."))));

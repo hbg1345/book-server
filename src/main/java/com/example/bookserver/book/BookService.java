@@ -63,8 +63,9 @@ public class BookService {
             SEARCH_PAGE_SIZE * BookPage.NAVIGATION_PAGE_COUNT + 1;
 
     /**
-     * One fixed-size page of books whose title contains {@code title}, case-insensitively,
-     * newest first (bodies only, authors not fetched).
+     * One fixed-size page of books relevant to {@code title}, case-insensitively (bodies only,
+     * authors not fetched). Exact titles rank first, followed by trigram similarity and title
+     * position; UUID only makes ties deterministic.
      *
      * <p>The navigation probe counts at most 101 matches starting at this page: enough to know
      * which of the next five page buttons exist and whether {@code >>} may move to the next
