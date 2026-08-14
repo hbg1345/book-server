@@ -75,7 +75,42 @@ tasks.named('test') {
     systemProperty 'stripe.webhook-secret', 'whsec_dummy_not_a_real_secret'
     useJUnitPlatform {
         excludeTags 'benchmark'   // keep the heavy 1M-row benchmark out of the normal test run
+        excludeTags 'search-quality' // full-catalog offline relevance evaluation
+        excludeTags 'production-read' // explicit read-only tools against production Cloud SQL
         excludeTags 'contract'    // and the sandbox contract, which needs a real key and a network
+    }
+}
+
+// Reads a deterministic title sample from production Cloud SQL. The caller must provide
+// PRODUCTION_DATABASE_URL, PRODUCTION_DATABASE_USERNAME and PRODUCTION_DATABASE_PASSWORD.
+tasks.register('sampleProductionBookTitles', Test) {
+    description = 'Exports a read-only sample of real production book titles.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'production-read'
+    }
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'failed'
+    }
+}
+
+// Loads the full seed catalogue and evaluates the frozen production-title sample locally.
+tasks.register('searchRelevanceEvaluation', Test) {
+    description = 'Measures offline title-search relevance on a real production-title sample.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'search-quality'
+    }
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'failed'
     }
 }
 

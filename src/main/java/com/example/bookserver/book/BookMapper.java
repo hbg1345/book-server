@@ -34,7 +34,7 @@ public interface BookMapper {
     @Select("SELECT * FROM book WHERE book_uuid = #{bookUuid}")
     Book findById(UUID bookUuid);
 
-    // Title search: substring match, case-insensitive, newest first (book_uuid is UUIDv7).
+    // Title search: literal substring and typo-tolerant trigram candidates, relevance first.
     //
     // The nested replace() escapes the LIKE wildcards out of the user's text before it is
     // wrapped in '%...%'. This is not injection defence — #{title} is a bound parameter, so
@@ -44,14 +44,33 @@ public interface BookMapper {
     // escaping keeps the result equal to what was typed, and lives here rather than in the
     // caller so that every caller gets it, not only the one that remembers.
     //
-    // The trigram GIN index accelerates this predicate, but a broad term can still match much
-    // of the ~103k-row catalogue. LIMIT and OFFSET keep each response to one page.
+    // Fuzzy matching starts at three characters and is disabled when the user deliberately
+    // typed a LIKE metacharacter. That preserves the literal '%'/'_' contract instead of
+    // quietly returning a merely similar title after escaping the substring branch.
+    //
+    // Full-title equality is the strongest signal. Remaining candidates use the best matching
+    // title extent, title-start position, whole-title similarity and compactness. UUIDv7 is only
+    // a deterministic final tie-breaker; recency is not treated as relevance.
+    //
+    // ILIKE and both trigram operators are supported by the existing pg_trgm GIN index. A broad
+    // term can still match much of the ~103k-row catalogue, so LIMIT and OFFSET stay bounded.
     @Select("""
             SELECT * FROM book
-            WHERE book_title ILIKE '%' ||
-                  replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
-                  || '%' ESCAPE '\\'
-            ORDER BY book_uuid DESC
+            WHERE (book_title ILIKE '%' ||
+                   replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+                   || '%' ESCAPE '\\')
+               OR (char_length(#{title}) >= 3
+                   AND strpos(#{title}, '%') = 0
+                   AND strpos(#{title}, '_') = 0
+                   AND strpos(#{title}, chr(92)) = 0
+                   AND (book_title %> #{title} OR book_title % #{title}))
+            ORDER BY
+                CASE WHEN lower(book_title) = lower(#{title}) THEN 0 ELSE 1 END,
+                word_similarity(#{title}, book_title) DESC,
+                CASE WHEN starts_with(lower(book_title), lower(#{title})) THEN 0 ELSE 1 END,
+                similarity(#{title}, book_title) DESC,
+                char_length(book_title),
+                book_uuid DESC
             OFFSET #{offset}
             LIMIT #{limit}
             """)
@@ -67,10 +86,14 @@ public interface BookMapper {
             FROM (
                 SELECT 1
                 FROM book
-                WHERE book_title ILIKE '%' ||
-                      replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
-                      || '%' ESCAPE '\\'
-                ORDER BY book_uuid DESC
+                WHERE (book_title ILIKE '%' ||
+                       replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+                       || '%' ESCAPE '\\')
+                   OR (char_length(#{title}) >= 3
+                       AND strpos(#{title}, '%') = 0
+                       AND strpos(#{title}, '_') = 0
+                       AND strpos(#{title}, chr(92)) = 0
+                       AND (book_title %> #{title} OR book_title % #{title}))
                 OFFSET #{offset}
                 LIMIT #{limit}
             ) navigation_window
