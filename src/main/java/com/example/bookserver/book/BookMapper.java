@@ -49,26 +49,47 @@ public interface BookMapper {
     // quietly returning a merely similar title after escaping the substring branch.
     //
     // Full-title equality is the strongest signal. Remaining candidates use the best matching
-    // title extent, title-start position, whole-title similarity and compactness. UUIDv7 is only
+    // title extent, whole-title similarity, title-start position and compactness. UUIDv7 is only
     // a deterministic final tie-breaker; recency is not treated as relevance.
     //
-    // ILIKE and both trigram operators are supported by the existing pg_trgm GIN index. A broad
-    // term can still match much of the ~103k-row catalogue, so LIMIT and OFFSET stay bounded.
+    // Each parenthesised branch follows the first two fuzzy ranking keys before it is capped.
+    // Both distances are GiST KNN orderings. WITH TIES keeps the complete score group at the
+    // boundary; without it, asking for 20 and then 40 candidates could select different members
+    // of an equal-score group and make adjacent pages overlap. UNION removes matches shared by
+    // the literal, word and whole-title sources before the deterministic final tie-breakers.
     @Select("""
-            SELECT * FROM book
-            WHERE (book_title ILIKE '%' ||
-                   replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
-                   || '%' ESCAPE '\\')
-               OR (char_length(#{title}) >= 3
+            WITH candidates AS MATERIALIZED (
+                (SELECT * FROM book
+                 WHERE book_title ILIKE '%' ||
+                       replace(replace(replace(#{title}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+                       || '%' ESCAPE '\\'
+                 ORDER BY #{title} <<-> book_title, #{title} <-> book_title
+                 FETCH FIRST (#{offset} + #{limit}) ROWS WITH TIES)
+                UNION
+                (SELECT * FROM book
+                 WHERE char_length(#{title}) >= 3
                    AND strpos(#{title}, '%') = 0
                    AND strpos(#{title}, '_') = 0
                    AND strpos(#{title}, chr(92)) = 0
-                   AND (book_title %> #{title} OR book_title % #{title}))
+                   AND #{title} <% book_title
+                 ORDER BY #{title} <<-> book_title, #{title} <-> book_title
+                 FETCH FIRST (#{offset} + #{limit}) ROWS WITH TIES)
+                UNION
+                (SELECT * FROM book
+                 WHERE char_length(#{title}) >= 3
+                   AND strpos(#{title}, '%') = 0
+                   AND strpos(#{title}, '_') = 0
+                   AND strpos(#{title}, chr(92)) = 0
+                   AND book_title % #{title}
+                 ORDER BY #{title} <<-> book_title, #{title} <-> book_title
+                 FETCH FIRST (#{offset} + #{limit}) ROWS WITH TIES)
+            )
+            SELECT * FROM candidates
             ORDER BY
                 CASE WHEN lower(book_title) = lower(#{title}) THEN 0 ELSE 1 END,
                 word_similarity(#{title}, book_title) DESC,
-                CASE WHEN starts_with(lower(book_title), lower(#{title})) THEN 0 ELSE 1 END,
                 similarity(#{title}, book_title) DESC,
+                CASE WHEN starts_with(lower(book_title), lower(#{title})) THEN 0 ELSE 1 END,
                 char_length(book_title),
                 book_uuid DESC
             OFFSET #{offset}
@@ -80,7 +101,9 @@ public interface BookMapper {
 
     // Bounded look-ahead for numeric navigation. This is not a count of every search hit: the
     // inner query stops after the five visible pages plus one row. The extra row is enough to
-    // decide whether the client should render >> for the next block.
+    // decide whether the client should render >> for the next block. Unlike the ranked result
+    // query, this only asks whether enough matches exist; GIN can filter that bounded window
+    // without paying for similarity ordering.
     @Select("""
             SELECT COUNT(*)
             FROM (

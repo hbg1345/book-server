@@ -54,6 +54,21 @@ class BookSearchRelevanceEvaluationTest {
 
         assertThat(titles).hasSize(60);
         assertThat(results).hasSizeGreaterThan(120);
+
+        MetricPoint overall = metrics(results);
+        MetricPoint exact = metrics(resultsFor(results, QueryKind.EXACT));
+        MetricPoint typo = metrics(resultsFor(results, QueryKind.ONE_CHAR_TYPO));
+        MetricPoint punctuation = metrics(resultsFor(results, QueryKind.PUNCTUATION_NORMALIZED));
+
+        // These floors freeze the quality delivered by the first trigram ranker. Performance
+        // work may change how candidates are retrieved, but it may not silently trade away the
+        // user-visible recovery that justified fuzzy search in the first place.
+        assertThat(overall.top1()).isGreaterThanOrEqualTo(0.968);
+        assertThat(overall.hitAt10()).isGreaterThanOrEqualTo(0.993);
+        assertThat(overall.mrrAt10()).isGreaterThanOrEqualTo(0.976);
+        assertThat(exact.top1()).isEqualTo(1.0);
+        assertThat(typo.hitAt10()).isGreaterThanOrEqualTo(0.983);
+        assertThat(punctuation.hitAt10()).isEqualTo(1.0);
     }
 
     private EvaluationResult evaluate(EvaluationCase evaluationCase) {
@@ -116,11 +131,16 @@ class BookSearchRelevanceEvaluationTest {
                     .toList());
         }
         for (QueryKind kind : QueryKind.values()) {
-            appendMetrics(report, kind.name(), results.stream()
-                    .filter(result -> result.evaluationCase().kind() == kind)
-                    .toList());
+            appendMetrics(report, kind.name(), resultsFor(results, kind));
         }
         return report.toString();
+    }
+
+    private List<EvaluationResult> resultsFor(
+            List<EvaluationResult> results, QueryKind kind) {
+        return results.stream()
+                .filter(result -> result.evaluationCase().kind() == kind)
+                .toList();
     }
 
     private void appendMetrics(
