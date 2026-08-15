@@ -83,7 +83,7 @@ who omits title punctuation almost never recovers it.
 ## Trigram relevance candidate
 
 The first candidate keeps literal substring matching, adds pg_trgm word/whole-title candidates,
-and sorts by exact-title equality, word similarity, title-start position, whole-title similarity,
+and sorts by exact-title equality, word similarity, whole-title similarity, title-start position,
 title length, and finally UUID as a deterministic tie-breaker.
 
 | Segment | n | Top-1 | Hit@10 (95% CI) | MRR@10 (95% CI) |
@@ -96,8 +96,58 @@ title length, and finally UUID as a deterministic tie-breaker.
 | Punctuation normalized | 37 | 97.3% | 100.0% (100.0-100.0) | 0.986 (0.959-1.000) |
 
 Compared with the baseline, overall Hit@10 rises by 61.2 percentage points and MRR@10 by
-0.623. This is only the relevance gate; the extra trigram candidate generation and scoring must
-still pass latency/throughput load tests before deployment.
+0.623. The bounded GiST KNN retrieval described below reproduces these values exactly; its test
+also fails when the established overall, exact-title, typo, or punctuation floors regress.
+
+## Performance failure of the unbounded ranker
+
+The first deployed relevance query generated candidates with GIN but evaluated the complete
+matching set before applying its multi-signal ordering. The same 500-user, 120-second Gatling
+profiles used for the preceding page-depth comparison showed that this design was not viable:
+
+| Page | Version | Throughput | p50 | p95 | Failed requests |
+|---:|---|---:|---:|---:|---:|
+| 0 | substring baseline | 437.07 req/s | 172 ms | 1,298 ms | 1 / 65,123 |
+| 0 | unbounded relevance ranker | 12.24 req/s | 20,213 ms | 43,184 ms | 103 / 1,799 |
+| 100 | substring baseline | 157.33 req/s | 1,164 ms | 4,702 ms | 0 / 19,351 |
+| 100 | unbounded relevance ranker | 10.28 req/s | 27,001 ms | 54,031 ms | 194 / 1,563 |
+
+Cloud Run logs tied the 500 responses to connection starvation rather than client networking:
+all ten Hikari connections were active, none were idle, as many as 59 requests were waiting, and
+connection acquisition timed out after 30 seconds. Increasing the pool would only admit more
+expensive sorts to Cloud SQL, so the query plan had to change.
+
+## Bounded GiST KNN candidate
+
+The optimized query retains the same candidate predicates. It adds a GiST trigram index and
+obtains a bounded prefix from each literal, word-similarity, and whole-title-similarity source in
+word-distance and whole-title-distance order. `WITH TIES` includes the complete score group at
+the boundary before the three sources are deduplicated and deterministically ranked. This avoids
+adjacent-page overlap when different page requests otherwise cut through the same score group.
+The existing GIN index remains useful for the separate bounded navigation probe, which needs
+filtering but no similarity ordering.
+
+The local pre-merge benchmark used the complete 103,055-row seed catalogue and the same 17 broad
+terms as both Gatling page-depth simulations:
+
+| Index configuration | Page | Total p50 | Total p95 |
+|---|---:|---:|---:|
+| GIN only | 0 | 268.9 ms | 6,049.9 ms |
+| GiST only | 0 | 143.1 ms | 193.7 ms |
+| GIN + GiST | 0 | 81.1 ms | 133.3 ms |
+| GIN only | 100 | 409.6 ms | 2,195.1 ms |
+| GiST only | 100 | 312.5 ms | 393.0 ms |
+| GIN + GiST | 100 | 315.3 ms | 460.0 ms |
+
+For the representative broad term `The`, the GIN-only plan scanned and sorted the matching set in
+504.9 ms. The two-distance GiST nearest-neighbour plan returned the stable top score group in
+44.7-46.4 ms. Index sizes were 14 MB for GIN and 19 MB for GiST.
+
+An earlier word-distance-only KNN variant produced a lower page-0 total p50/p95 of 28.2/45.7 ms,
+but it was rejected: equal word-distance rows were truncated before the deterministic business
+tie-breakers, so adjacent pages could overlap. The figures in the table include the correctness
+fix. These single-threaded local measurements establish the plan change and catch gross
+regressions; they do not replace a fresh deployed Gatling run.
 
 ## Run
 
@@ -105,6 +155,12 @@ Docker Desktop must be running. This is an offline relevance evaluation, not a l
 
 ```bash
 ./gradlew searchRelevanceEvaluation
+```
+
+The local full-catalogue index and query-plan comparison is separate:
+
+```bash
+./gradlew searchPerformanceEvaluation
 ```
 
 `sampleProductionBookTitles` is a separate explicit production-read task. It requires
@@ -117,9 +173,10 @@ values.
 - The queries are deterministic perturbations, not observed user language.
 - The source catalogue is English-only, so the score says nothing about Korean search.
 - The holdout has only 32 cases; its confidence interval is correspondingly wide.
-- Offline relevance improvement is insufficient by itself. A candidate also has to pass the
-  first/deep-page latency guardrails, followed by online CTR, reformulation, abandonment, and
-  purchase-conversion measurement when real traffic exists.
+- Offline relevance and local query-plan improvement are insufficient by themselves. The bounded
+  GiST candidate still has to pass the same first/deep-page deployed latency guardrails, followed
+  by online CTR, reformulation, abandonment, and purchase-conversion measurement when real
+  traffic exists.
 
 No relevance implementation should be merged solely because it scores well on these synthetic
 navigational transformations. It must also improve a blind, human-judged keyword pool and retain

@@ -335,6 +335,32 @@ public class BookMapperTest {
                 .isNotIn(firstTwo.stream().map(Book::getBookUuid).toList());
     }
 
+    // The KNN branches request a growing prefix (offset + limit). A later page must therefore
+    // extend the same deterministic order instead of selecting a fresh, overlapping sample.
+    @Test
+    void searchByTitle_keepsKnnPagesStableAndDisjoint() {
+        for (int i = 0; i < 8; i++) {
+            insertTitled("Clean volume " + i);
+        }
+
+        List<Book> firstPage = bookMapper.searchByTitle("Clean", 0, 3);
+        List<Book> repeatedFirstPage = bookMapper.searchByTitle("Clean", 0, 3);
+        List<Book> secondPage = bookMapper.searchByTitle("Clean", 3, 3);
+        List<Book> firstSix = bookMapper.searchByTitle("Clean", 0, 6);
+
+        assertThat(repeatedFirstPage).extracting(Book::getBookUuid)
+                .containsExactlyElementsOf(
+                        firstPage.stream().map(Book::getBookUuid).toList());
+        assertThat(secondPage).extracting(Book::getBookUuid)
+                .doesNotContainAnyElementsOf(
+                        firstPage.stream().map(Book::getBookUuid).toList());
+        assertThat(firstSix).extracting(Book::getBookUuid)
+                .containsExactlyElementsOf(
+                        java.util.stream.Stream.concat(firstPage.stream(), secondPage.stream())
+                                .map(Book::getBookUuid)
+                                .toList());
+    }
+
     // The navigation query counts only its bounded window, never every matching row.
     @Test
     void countSearchWindow_stopsAtTheLimit() {
