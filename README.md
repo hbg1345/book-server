@@ -1,4 +1,65 @@
-# book-server
+# Book Server
+
+[日本語](#日本語) | [English](#english)
+
+## 日本語
+
+### 概要
+
+Book Serverは、実際のサービス要件をデータモデル、API、トランザクション、非同期処理、テスト、デプロイへ落とし込む一連のサーバー設計を学ぶため、2026年7月26日から個人で開発しているオンライン書店REST APIです。
+
+103,055冊のカタログを対象に、会員・住所管理、書籍検索、カート、注文、決済、キャンセル、部分返金、購入確定を提供します。要件とfailure scenarioの定義から、DB/API設計、実装、テスト、Google Cloudへのデプロイ、性能・検索品質評価まで一人で担当しました。
+
+- [API documentation / Swagger UI](https://hbg1345.github.io/book-server/)
+- Production: Spring Boot on Cloud Run + PostgreSQL on Cloud SQL
+
+### 技術的に注力した点
+
+#### 1. 検索品質と応答性能の両立
+
+単純な`ILIKE`検索では、完全一致、1文字のtypo、句読点を省略した検索を適切に順位付けできませんでした。trigramを利用した複数の関連度signalを導入し、157 queryの評価でTop-1 **96.8%**、Hit@10 **99.4%**を記録しました。
+
+最初の関連度検索はGINで候補を抽出した後、該当する全件をsortしていました。500 virtual users・120秒のGatling testではpage 0/100のp95が43,184/54,031 msまで悪化し、Hikariの10 connectionがすべて使用され、最大59 requestがconnectionを待ちました。pool拡大は高コストqueryをCloud SQLへさらに流すだけだと判断し、query planを変更しました。
+
+現在はliteral substring、word similarity、whole-title similarityごとに必要範囲だけをGiST KNNで取得し、重複排除後に決定論的に順位付けします。GINはsimilarity sortが不要なbounded navigation probeに残しました。103,055行のlocal benchmarkでは、page 0/100のp95をGIN-onlyの6,049.9/2,195.1 msから、GIN+GiSTの133.3/460.0 msへ短縮しました。
+
+より速いword-distance-only案も試しましたが、同点結果がpage boundaryで切られ、隣接pageに同じ書籍が重複する可能性がありました。そこで`WITH TIES`で境界の同点groupを含め、whole-title distanceとbusiness tie-breakerを適用する案を採用しました。
+
+詳細: [Book title search relevance evaluation](docs/book-search-relevance-evaluation.md)
+
+#### 2. 連続クリックとretryに対する冪等性
+
+カート行は`(user_uuid, book_uuid)`を複合主キーとし、`INSERT ... ON CONFLICT DO UPDATE`で数量を原子的に加算します。checkoutではcart rowを`FOR UPDATE OF ci`でlockし、同じカートから2件の注文が作られることを防ぎます。
+
+決済は注文UUIDから同じidempotency keyを生成し、内部`payment` tableのUNIQUE制約とStripe requestの両方に同じ重複排除単位を適用します。Testcontainersを用いた同時実行testで、カート数量の消失、二重checkout、在庫超過、二重refundが発生しないことを検証しています。
+
+#### 3. 現在状態と監査履歴を両立する注文モデル
+
+履歴だけを蓄積すると注文一覧のたびに最新行を計算する必要があり、現在状態だけを上書きすると変更過程を追跡できません。そこで、注文状態を`purchase_history`、各時点の商品・数量・価格snapshotを`purchase_book_history`へappend-onlyで保存し、`purchase_current`には現在状態と最新`history_uuid`をhead pointerとして保持します。
+
+注文一覧は`purchase_current`のuser indexから直接読み、詳細画面はhead pointerと履歴をたどります。読み取り目的を分けながら、決済待ち、配送、キャンセル、返金までの監査可能性を維持しています。
+
+### 信頼性と運用
+
+- Flywayをschema変更とcatalog seedの単一基準として使用
+- Testcontainers PostgreSQLで実migration、SQL、lock、競合状態を検証
+- Spring REST Docs testからOpenAPI 3を生成し、Swagger UIと共にGitHub Pagesへ公開
+- GitHub Actionsでtest、API document生成、Docker image build、Cloud Run deployを自動化
+- GitHub OIDC + Workload Identity Federationを利用し、長期GCP keyを保存しない構成
+- 未決済注文はorderごとのCloud Taskで失効し、Cloud Scheduler sweepを補正処理として利用
+
+### 技術スタック
+
+- Language: Java 17
+- Backend: Spring Boot 4, Spring Security, MyBatis
+- Database: PostgreSQL, Flyway
+- Payment: Stripe
+- Infrastructure: Google Cloud Run, Cloud SQL, Cloud Tasks, Cloud Scheduler, Docker
+- Test and documentation: JUnit, Testcontainers, Gatling, Spring REST Docs, OpenAPI
+
+---
+
+## English
 
 Online bookstore REST API — Spring Boot 4 + Java 17, MyBatis + PostgreSQL.
 
@@ -34,8 +95,8 @@ endpoints, run locally and seed an admin (see [Trying the admin endpoints](#tryi
 
 ## Run with Docker
 
-Brings up the app and a PostgreSQL instance together. On first start Flyway builds the
-schema and seeds the catalog (V1 → V4), so the first boot takes a bit longer.
+Brings up the app and a PostgreSQL instance together. On first start Flyway applies every
+versioned migration and seeds the catalog, so the first boot takes a bit longer.
 
 ```bash
 docker compose up --build
@@ -103,13 +164,15 @@ disabled on the public deployment, so the live catalog has no admin.
 
 Schema and data are migration-owned; there is no hand-written `schema.sql`.
 
-- `V1__init.sql` — core tables (users, books, authors, cart, orders).
-- `V2__add_category_tree.sql` — normalized category tree (`category(uuid, parent_uuid, name)`,
-  self-FK) plus `book.category_uuid`.
-- `V3__add_user_role.sql` — `book_user.role` (`USER`/`ADMIN`) for role-based access control.
-- `V4__Seed_book_catalog.java` — streams four gzipped, pre-normalized files from
+- `V1__init.sql` — core tables for users, books, authors, carts, and current/history order state.
+- `V2__add_category_tree.sql` — normalized category tree plus `book.category_uuid`.
+- `V3__Seed_book_catalog.java` — streams four gzipped, pre-normalized files from
   `src/main/resources/db/seed/` into Postgres via `COPY` (categories → authors → books →
   book_authors).
+- `V4`–`V7` — user roles, address book, immutable order delivery addresses, and shipment tracking.
+- `V8`–`V11` — payments, refund-failure state, provider transaction uniqueness, and partial cancellation.
+- `V12`–`V13` — one normalized address per user and book ISBNs.
+- `V14`–`V15` — GIN and GiST trigram indexes for title search.
 
 The seed files are generated offline by `scripts/generate_book_seed.py` from
 `archive/BooksDatasetClean.csv` (the raw CSV is gitignored). UUIDs are baked into the seed,
