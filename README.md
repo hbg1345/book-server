@@ -1,272 +1,169 @@
 # Book Server
 
-[日本語](#日本語) | [English](#english)
+백엔드 개발을 학습하기 위해 만든 온라인 서점 REST API 서버입니다. 회원 가입부터 도서 조회, 장바구니, 주문, 결제와 환불까지 구현하며 데이터 설계, 트랜잭션, 동시성 처리와 배포 과정을 학습했습니다.
 
-## 日本語
+- **개발 형태:** 개인 프로젝트
+- **담당 범위:** API와 DB 설계, 서버 구현, 테스트, 컨테이너 배포, CI/CD 구성
+- **현재 범위:** Cloud Run 배포와 Stripe 샌드박스 연동을 수행한 학습 프로젝트로, 실제 사용자를 대상으로 운영한 경험은 없습니다.
 
-### 概要
+[API 문서 (Swagger UI)](https://hbg1345.github.io/book-server/) · [검색 설계와 평가](docs/book-search-relevance-evaluation.md) · [부하 테스트 안내](LOAD_TEST_GUIDE.md)
 
-Book Serverは、実際のサービス要件をデータモデル、API、トランザクション、非同期処理、テスト、デプロイへ落とし込む一連のサーバー設計を学ぶため、2026年7月26日から個人で開発しているオンライン書店REST APIです。
+## 주요 기능
 
-103,055冊のカタログを対象に、会員・住所管理、書籍検索、カート、注文、決済、キャンセル、部分返金、購入確定を提供します。要件とfailure scenarioの定義から、DB/API設計、実装、テスト、Google Cloudへのデプロイ、性能・検索品質評価まで一人で担当しました。
+- **회원과 인증:** 회원 가입, 로그인, 액세스 토큰 발급, 리프레시 토큰 갱신, 사용자와 관리자 권한 구분
+- **회원 정보와 주소:** 내 정보 수정, 비밀번호 변경, 배송지 관리
+- **도서와 저자:** 도서 목록과 상세 조회, 제목 검색, 관리자용 도서 등록과 수정 및 삭제, 저자 조회와 등록
+- **장바구니:** 도서 추가, 수량 변경, 항목 삭제
+- **주문:** 주문 생성, 주문 내역 조회, 배송 정보와 주문 당시 가격 보존, 취소와 부분 취소
+- **결제:** Stripe 결제 요청, 웹훅을 통한 결제 결과 반영, 환불 요청
+- **미결제 주문 정리:** 결제 대기 시간에 따른 만료 처리와 예약 작업 누락을 보완하는 주기적 조회
 
-- [API documentation / Swagger UI](https://hbg1345.github.io/book-server/)
-- Production: Spring Boot on Cloud Run + PostgreSQL on Cloud SQL
+각 API의 요청과 응답은 [API 문서](https://hbg1345.github.io/book-server/)에서 확인할 수 있습니다. Swagger UI의 요청 대상은 배포된 Cloud Run 주소로 설정되어 있습니다.
 
-### 技術的に注力した点
+## 기술 스택
 
-#### 1. 検索品質と応答性能の両立
+- **서버와 인증:** Java 17, Spring Boot 4.1.0, Spring MVC, Spring Security, JJWT
+- **데이터:** PostgreSQL, MyBatis, Flyway
+- **결제와 예약 작업:** Stripe, Google Cloud Tasks, Cloud Scheduler
+- **실행과 배포:** Gradle, Docker, Docker Compose, GitHub Actions, Cloud Run, Cloud SQL
+- **테스트:** JUnit, Mockito, MockMvc, Testcontainers, Gatling
+- **API 문서:** Spring REST Docs, OpenAPI, Swagger UI
 
-単純な`ILIKE`検索では、完全一致、1文字のtypo、句読点を省略した検索を適切に順位付けできませんでした。trigramを利用した複数の関連度signalを導入し、157 queryの評価でTop-1 **96.8%**、Hit@10 **99.4%**を記録しました。
+## 전체 구조
 
-最初の関連度検索はGINで候補を抽出した後、該当する全件をsortしていました。500 virtual users・120秒のGatling testではpage 0/100のp95が43,184/54,031 msまで悪化し、Hikariの10 connectionがすべて使用され、最大59 requestがconnectionを待ちました。pool拡大は高コストqueryをCloud SQLへさらに流すだけだと判断し、query planを変更しました。
+회원, 도서, 주문, 결제 기능을 하나의 Spring Boot 애플리케이션으로 구성했습니다. 기능별 패키지 안에서 Controller, Service, Repository의 책임을 나누며, Repository 계층의 데이터 접근은 MyBatis Mapper로 구현했습니다.
 
-現在はliteral substring、word similarity、whole-title similarityごとに必要範囲だけをGiST KNNで取得し、重複排除後に決定論的に順位付けします。GINはsimilarity sortが不要なbounded navigation probeに残しました。103,055行のlocal benchmarkでは、page 0/100のp95をGIN-onlyの6,049.9/2,195.1 msから、GIN+GiSTの133.3/460.0 msへ短縮しました。
+```mermaid
+flowchart TD
+    Client[클라이언트] -->|HTTP 요청| App
+    Stripe[Stripe] -->|결제 결과 웹훅| App
+    Tasks[Cloud Tasks] -->|주문별 만료 요청| App
+    Scheduler[Cloud Scheduler] -->|미결제 주문 정리 요청| App
 
-より速いword-distance-only案も試しましたが、同点結果がpage boundaryで切られ、隣接pageに同じ書籍が重複する可能性がありました。そこで`WITH TIES`で境界の同点groupを含め、whole-title distanceとbusiness tie-breakerを適用する案を採用しました。
+    subgraph App[Cloud Run / Spring Boot 애플리케이션]
+        Web[Tomcat / Spring Security / Spring MVC]
+        Web --> Controller
+        Controller --> Service
+        Service --> Repository[Repository / MyBatis Mapper]
+    end
 
-詳細: [Book title search relevance evaluation](docs/book-search-relevance-evaluation.md)
+    Repository --> DB[(Cloud SQL / PostgreSQL)]
+    Service -->|결제 및 환불 API| Stripe
+    Controller -->|주문 커밋 후 만료 작업 예약| Tasks
+```
 
-#### 2. 連続クリックとretryに対する冪等性
+로컬에서는 Docker Compose로 애플리케이션과 PostgreSQL을 함께 실행합니다. Cloud Tasks는 기본적으로 비활성화되어 있으며, 로컬 실행만으로 Cloud Scheduler 작업이 생성되지는 않습니다.
 
-カート行は`(user_uuid, book_uuid)`を複合主キーとし、`INSERT ... ON CONFLICT DO UPDATE`で数量を原子的に加算します。checkoutではcart rowを`FOR UPDATE OF ci`でlockし、同じカートから2件の注文が作られることを防ぎます。
+## 주요 설계와 구현
 
-決済は注文UUIDから同じidempotency keyを生成し、内部`payment` tableのUNIQUE制約とStripe requestの両方に同じ重複排除単位を適用します。Testcontainersを用いた同時実行testで、カート数量の消失、二重checkout、在庫超過、二重refundが発生しないことを検証しています。
+### 주문과 재고의 동시성 처리
 
-#### 3. 現在状態と監査履歴を両立する注文モデル
+같은 장바구니의 중복 제출을 제어하기 위해 주문 생성 시 장바구니 행을 잠급니다. 재고 차감, 주문과 이력 저장, 배송지 저장, 장바구니 비우기를 하나의 트랜잭션에서 처리합니다.
 
-履歴だけを蓄積すると注文一覧のたびに最新行を計算する必要があり、現在状態だけを上書きすると変更過程を追跡できません。そこで、注文状態を`purchase_history`、各時点の商品・数量・価格snapshotを`purchase_book_history`へappend-onlyで保存し、`purchase_current`には現在状態と最新`history_uuid`をhead pointerとして保持します。
+재고는 구매 수량 이상인 경우에만 차감하는 조건부 UPDATE를 사용합니다. 취소와 만료가 동시에 실행될 때는 현재 주문 행을 잠근 뒤 상태를 다시 확인해 재고가 중복 복원되는 것을 제어합니다.
 
-注文一覧は`purchase_current`のuser indexから直接読み、詳細画面はhead pointerと履歴をたどります。読み取り目的を分けながら、決済待ち、配送、キャンセル、返金までの監査可能性を維持しています。
+Testcontainers PostgreSQL을 이용해 재고 경쟁, 같은 장바구니의 중복 주문, 취소와 만료의 동시 실행 등을 검증하는 테스트를 작성했습니다. 이 테스트에서 외부 결제는 대역으로 교체합니다.
 
-### 信頼性と運用
+- [주문 서비스](src/main/java/com/example/bookserver/purchase/PurchaseService.java)
+- [주문 동시성 테스트](src/test/java/com/example/bookserver/purchase/PurchaseConcurrencyTest.java)
 
-- Flywayをschema変更とcatalog seedの単一基準として使用
-- Testcontainers PostgreSQLで実migration、SQL、lock、競合状態を検証
-- Spring REST Docs testからOpenAPI 3を生成し、Swagger UIと共にGitHub Pagesへ公開
-- GitHub Actionsでtest、API document生成、Docker image build、Cloud Run deployを自動化
-- GitHub OIDC + Workload Identity Federationを利用し、長期GCP keyを保存しない構成
-- 未決済注文はorderごとのCloud Taskで失効し、Cloud Scheduler sweepを補正処理として利用
+### 결제 재요청과 비동기 이벤트 처리
 
-### 技術スタック
+결제 요청에는 주문 UUID로 만든 멱등성 키를 사용하고, 내부 결제 테이블에도 고유 제약을 적용했습니다. 결제 금액은 서버에 저장된 주문 금액으로 결정하며, 웹훅의 서명, 통화, 금액을 확인한 뒤 결제 결과를 반영합니다.
 
-- Language: Java 17
-- Backend: Spring Boot 4, Spring Security, MyBatis
-- Database: PostgreSQL, Flyway
-- Payment: Stripe
-- Infrastructure: Google Cloud Run, Cloud SQL, Cloud Tasks, Cloud Scheduler, Docker
-- Test and documentation: JUnit, Testcontainers, Gatling, Spring REST Docs, OpenAPI
+미결제 주문은 Cloud Tasks로 개별 만료 작업을 예약합니다. 주문 저장 후 작업 등록이 실패하는 경우에는 Cloud Scheduler가 호출하는 주기적 조회로 기한이 지난 주문을 다시 찾아 처리합니다.
 
----
+Stripe 샌드박스에 실제 API 요청을 보내는 계약 테스트는 일반 테스트와 분리했습니다. 테스트 카드 결제와 환불을 확인하는 범위이며, 실제 금액의 청구나 정산을 검증한 결과는 아닙니다.
 
-## English
+- [결제 연동 코드](src/main/java/com/example/bookserver/payment)
+- [Stripe 샌드박스 계약 테스트](src/test/java/com/example/bookserver/payment/stripe/StripeSandboxContractTest.java)
 
-Online bookstore REST API — Spring Boot 4 + Java 17, MyBatis + PostgreSQL.
+### 주문의 현재 상태와 변경 이력
 
-JWT-authenticated user accounts, a browsable ~103k-book catalog, cart, and orders.
-The whole schema **and** the catalog seed are owned by Flyway, so local, Docker, and
-production (Cloud SQL) all come up with identical data.
+`purchase_current`는 주문별 현재 상태를 유지하고, `purchase_history`와 `purchase_book_history`는 상태와 주문 도서의 변경 이력을 저장합니다. 현재 상태 조회와 이력 조회의 목적을 나누고, 이력 추가와 현재 상태 갱신은 같은 트랜잭션에서 수행합니다.
 
-## API
+주문 당시 가격과 배송지를 별도로 저장해 도서 가격이나 회원 주소록이 변경되어도 주문 당시 정보를 보존합니다. 스키마와 초기 카탈로그 적재는 Flyway 마이그레이션으로 관리합니다.
 
-Interactive docs (Swagger UI, generated from the tests and published on every push to
-`master`):
+- [DB 마이그레이션](src/main/resources/db/migration)
 
-**https://hbg1345.github.io/book-server/** → served against the live Cloud Run API.
+### 도서 검색
 
-| Area | Endpoints | Auth |
-|------|-----------|------|
-| Auth | `POST /api/auth/login` · `refresh` · `logout` | public |
-| Users | `POST /api/users` (sign up) · `GET/PUT /api/users/me` · `PUT /api/users/me/password` · `DELETE /api/users/me` | bearer (except sign-up) |
-| Books | `GET /api/books?title=…&page=0` (20/search page) · `GET /api/books/{uuid}` (public) · `POST/PUT/DELETE` | reads public; writes **admin** |
-| Authors | `GET /api/authors?name=` (public) · `POST /api/authors` | reads public; writes **admin** |
-| Cart | `GET /api/cart` · `POST /api/cart/items` · `PUT/DELETE /api/cart/items/{bookUuid}` | bearer |
-| Orders | `POST /api/orders` · `GET /api/orders` · `GET /api/orders/{uuid}` · `POST .../payment-intent` · `POST .../cancel` | bearer |
+PostgreSQL의 부분 일치 검색과 유사도 검색을 조합해 제목 검색을 구현했습니다. 검색 품질 평가와 인덱스별 성능 비교의 조건 및 결과는 [검색 설계와 평가 문서](docs/book-search-relevance-evaluation.md)에 정리했습니다.
 
-Auth is a short-lived access JWT (`Authorization: Bearer <accessToken>`) plus a rotating
-opaque refresh token. Send the access token on every protected call; use `/api/auth/refresh`
-to swap a refresh token for a fresh pair.
+## 로컬 실행
 
-Access control is role-based (`USER` / `ADMIN`). Self-registration always yields a `USER`;
-catalog **writes** (create/update/delete books and authors) require `ADMIN`. Unauthenticated
-requests to a protected route get `401`, authenticated-but-not-admin get `403`. The public
-deployment has no admin, so the live catalog is effectively read-only. To exercise the write
-endpoints, run locally and seed an admin (see [Trying the admin endpoints](#trying-the-admin-endpoints)).
+### 준비
 
-## Run with Docker
+Docker와 Docker Compose가 필요합니다. Gradle 명령을 호스트에서 실행하려면 JDK 17과 실행 중인 Docker 엔진이 필요합니다.
 
-Brings up the app and a PostgreSQL instance together. On first start Flyway applies every
-versioned migration and seeds the catalog, so the first boot takes a bit longer.
+1. 저장소 루트의 `.env.example`을 `.env`로 복사합니다.
+2. `.env`의 `STRIPE_SECRET_KEY`를 Stripe 테스트 모드 키로 설정합니다.
+3. 로컬 웹훅을 확인하려면 Stripe CLI에서 아래 명령을 실행하고, 출력되는 서명 키를 `.env`의 `STRIPE_WEBHOOK_SECRET`에 설정합니다.
+
+```bash
+stripe listen --forward-to localhost:8080/api/webhooks/stripe
+```
+
+설정 항목은 [.env.example](.env.example)을 참고하세요. `.env`는 Git 추적에서 제외되어 있습니다. Stripe 비밀 키가 누락되거나 비어 있으면 애플리케이션이 시작되지 않습니다.
+
+### 실행과 종료
 
 ```bash
 docker compose up --build
 ```
 
-- API: http://localhost:8080
-- PostgreSQL: localhost:5432 (db `bookdb`, user `bookuser`)
-
-Stop and remove containers (keep the data volume):
+- API 주소: `http://localhost:8080`
+- PostgreSQL: `localhost:5432` (기본 DB `bookdb`, 사용자 `bookuser`)
+- 최초 실행 시 Flyway가 스키마를 구성하고 카탈로그를 적재하므로 시간이 걸릴 수 있습니다.
 
 ```bash
 docker compose down
 ```
 
-Wipe the database too (drops the `pgdata` volume, so the next start re-runs Flyway from
-scratch):
+종료 후에도 DB 볼륨은 유지됩니다. 초기 데이터부터 다시 구성하려면 `docker compose down -v`를 실행할 수 있습니다. 이 명령은 로컬 DB 볼륨과 저장된 데이터를 삭제합니다.
 
-```bash
-docker compose down -v
-```
+로그인 응답의 액세스 토큰은 보호된 API 호출 시 `Authorization: Bearer <accessToken>` 헤더로 전달합니다. 일반 회원 가입은 `USER` 권한을 부여하며, 도서와 저자 관리용 쓰기 API에는 `ADMIN` 권한이 필요합니다.
 
-### Configuration
+## 테스트와 API 문서 생성
 
-Most things have a working default for local use; override via a `.env` file or the shell.
-Copy `.env.example` to `.env` to get started — the Stripe keys have no default and the app
-will not start without them.
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `bookdb` / `bookuser` / `bookpass` | Database name & credentials |
-| `JWT_SECRET` | dev-only placeholder | HS256 signing secret — **must** be set to a real value (≥ 32 bytes) in production |
-| `STRIPE_SECRET_KEY` | *(none — required)* | Stripe API key. There is no fallback payment gateway: without this the app refuses to start rather than booting unable to charge |
-| `STRIPE_WEBHOOK_SECRET` | *(none)* | Signing secret used to authenticate Stripe webhooks |
-| `STRIPE_CURRENCY` | `usd` | Currency charges are made in. Zero-decimal currencies (`krw`, `jpy`) are charged in whole units |
-
-The app reads its DB connection from `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD`,
-which `docker-compose.yml` wires to the `postgres` service.
-
-### Trying the admin endpoints
-
-Catalog writes require the `ADMIN` role, and self-registration only grants `USER`, so an
-admin has to be seeded. A config-driven bootstrap does this on startup — **off by default**,
-enable it for a local run:
-
-```bash
-ADMIN_BOOTSTRAP_ENABLED=true \
-ADMIN_BOOTSTRAP_USER_ID=admin \
-ADMIN_BOOTSTRAP_PASSWORD='choose-a-password' \
-docker compose up --build
-```
-
-Then log in and use the returned `accessToken` as `Authorization: Bearer <token>` on the
-write calls:
-
-```bash
-curl -s localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"userId":"admin","password":"choose-a-password"}'
-```
-
-The bootstrap is idempotent (re-asserts the role on restart) and is intentionally left
-disabled on the public deployment, so the live catalog has no admin.
-
-## Database & catalog seed
-
-Schema and data are migration-owned; there is no hand-written `schema.sql`.
-
-- `V1__init.sql` — core tables for users, books, authors, carts, and current/history order state.
-- `V2__add_category_tree.sql` — normalized category tree plus `book.category_uuid`.
-- `V3__Seed_book_catalog.java` — streams four gzipped, pre-normalized files from
-  `src/main/resources/db/seed/` into Postgres via `COPY` (categories → authors → books →
-  book_authors).
-- `V4`–`V7` — user roles, address book, immutable order delivery addresses, and shipment tracking.
-- `V8`–`V11` — payments, refund-failure state, provider transaction uniqueness, and partial cancellation.
-- `V12`–`V13` — one normalized address per user and book ISBNs.
-- `V14`–`V15` — GIN and GiST trigram indexes for title search.
-
-The seed files are generated offline by `scripts/generate_book_seed.py` from
-`archive/BooksDatasetClean.csv` (the raw CSV is gitignored). UUIDs are baked into the seed,
-so if you regenerate, regenerate **all four files together**.
-
-## Build the image only
-
-```bash
-docker build -t book-server .
-```
-
-The image is a multi-stage build: a JDK stage produces the boot jar (`bootJar`), and a
-slim JRE stage runs it as a non-root user. Tests are **not** run during the image build
-(they need a Docker daemon for Testcontainers) — they run in CI.
-
-## Run tests
+### 일반 테스트
 
 ```bash
 ./gradlew test
 ```
 
-Testcontainers starts a throwaway PostgreSQL, so Docker must be available. Tests get their
-schema from Flyway too — all migrations run, but the V3 catalog-seed migration copies
-nothing when the `catalogSeed.skip` system property is set (Gradle `test` task), so the
-schema is built without the heavy seed while staying in sync with prod migrations. Per-test
-isolation is a `@Sql("/reset.sql")` truncate.
+Windows PowerShell에서는 `./gradlew.bat test`를 사용합니다. Testcontainers가 테스트용 PostgreSQL을 실행하며, Flyway로 스키마를 구성합니다. 일반 테스트에서는 대규모 카탈로그 적재를 생략하고 외부 결제 호출을 대역으로 교체합니다.
 
-The heavy UUID v4-vs-v7 benchmark is excluded from the normal run:
+### Stripe 샌드박스 계약 테스트
 
 ```bash
-./gradlew benchmark
+./gradlew contractTest
 ```
 
-## API docs
+테스트 모드 키와 네트워크 연결이 필요합니다. 이 작업은 `.env`의 설정도 읽으며, 키가 없으면 테스트를 건너뜁니다.
 
-The OpenAPI 3 spec is generated from the RestDocs tests, not hand-maintained:
+### API 문서 생성
 
 ```bash
-./gradlew openapi3   # → build/api-spec/openapi3.yaml
+./gradlew asciidoctor openapi3
 ```
+
+API 테스트에서 생성한 Spring REST Docs 문서 조각으로 문서를 만들고, OpenAPI 명세를 `build/api-spec/openapi3.yaml`에 생성합니다.
+
+검색 품질 평가, 검색 성능 측정, UUID 벤치마크와 Gatling 부하 테스트는 일반 테스트에서 분리되어 있습니다. 실행 조건은 [검색 평가 문서](docs/book-search-relevance-evaluation.md)와 [부하 테스트 안내](LOAD_TEST_GUIDE.md)를 참고하세요.
 
 ## CI/CD
 
-`.github/workflows/ci.yml` runs on every push/PR to `master`:
+[GitHub Actions 워크플로](.github/workflows/ci.yml)는 `master` 대상 Pull Request와 `master` 변경 시 테스트와 API 문서 생성을 실행합니다. `master`에 반영된 변경은 테스트 성공 후 다음 작업으로 이어집니다.
 
-1. **test** — full suite via Testcontainers, and assembles the API docs.
-2. **deploy-docs** (push only) — publishes Swagger UI + the generated spec to GitHub Pages.
-3. **deploy** (push only) — builds & pushes the image to Artifact Registry and rolls out a
-   new Cloud Run revision. GCP auth is via Workload Identity Federation (no long-lived
-   keys); the DB password and `JWT_SECRET` come from GCP Secret Manager. Cloud SQL is
-   reached through the Postgres socket factory.
+1. OpenAPI 명세와 Swagger UI를 GitHub Pages에 게시합니다.
+2. 애플리케이션 이미지를 빌드해 Artifact Registry에 업로드하고 Cloud Run에 배포합니다.
+3. 배포된 서비스의 API를 호출해 Stripe 연결을 확인합니다.
 
-## Order expiry (releasing reserved stock)
+문서 게시와 애플리케이션 배포는 테스트 이후 별도 작업으로 실행됩니다. Google Cloud 접근에는 GitHub OIDC와 Workload Identity Federation을 사용하고, 배포 환경의 비밀 값은 Secret Manager에서 주입합니다.
 
-Orders reserve stock when placed; unpaid ones past `order.payment-timeout` (default 30m)
-must be cancelled to release it. The service runs on Cloud Run with scale-to-zero, so this
-is **not** an in-process timer (which wouldn't fire while no instance is up). It uses a
-**hybrid** of two internal endpoints, both outside the JWT surface and guarded by the shared
-`INTERNAL_SWEEP_TOKEN` secret in an `X-Internal-Token` header (fails closed if unset):
+## 현재 한계와 개선 방향
 
-| Endpoint | Trigger | Role |
-|----------|---------|------|
-| `POST /internal/orders/{id}/expire` | Cloud Tasks, one task per order scheduled at placement | precise per-order expiry at ~exactly the timeout |
-| `POST /internal/orders/expire-unpaid` | Cloud Scheduler cron | safety net — catches orders whose task enqueue failed (the order DB commit and the enqueue are separate systems) |
-
-Both call the same idempotent expiry (`expireUnpaidOrder`), which no-ops unless the order is
-still `PAYMENT_PENDING` — so at-least-once delivery and an order paid before the task fires
-are both harmless.
-
-### Prod setup
-
-Per-order Cloud Tasks is enabled by config (off locally, so no GCP is needed for dev/tests):
-
-```
-ORDER_EXPIRY_CLOUD_TASKS_ENABLED=true
-GCP_PROJECT_ID=<project>
-ORDER_EXPIRY_QUEUE_LOCATION=asia-northeast3
-ORDER_EXPIRY_QUEUE=<queue-name>
-ORDER_EXPIRY_TARGET_BASE_URL=https://<cloud-run-url>
-INTERNAL_SWEEP_TOKEN=<secret>       # from Secret Manager; also on the two jobs below
-```
-
-Create the queue once, and the safety-net Cloud Scheduler job:
-
-```bash
-gcloud tasks queues create <queue-name> --location=asia-northeast3
-
-gcloud scheduler jobs create http expire-unpaid-orders \
-  --location=asia-northeast3 \
-  --schedule="*/10 * * * *" \
-  --uri="https://<cloud-run-url>/internal/orders/expire-unpaid" \
-  --http-method=POST \
-  --headers="X-Internal-Token=<secret>"
-```
-
-(With per-order tasks doing the precise work, the safety-net sweep can run infrequently,
-e.g. every 10 minutes.)
+- **실제 사용자 운영:** 직접 작성한 테스트와 가상 사용자 시나리오를 중심으로 검증했습니다. 실제 사용자의 이용 패턴과 피드백을 바탕으로 개선하는 경험이 필요합니다. 결제 검증은 Stripe 샌드박스 범위입니다.
+- **운영 로그와 장애 복구:** 일부 실패 로그와 미결제 주문 재조회는 구현했지만, 장애 감지부터 영향받은 거래의 추적과 복구까지 이어지는 운영 절차는 보완해야 합니다. 요청과 거래를 연결하는 로그, 미완료 작업 기록, 외부 거래와 내부 상태의 대조, 강제 종료 후 복구 테스트를 개선 방향으로 두고 있습니다.
+- **배포 검증 단계:** 현재는 자동 테스트를 통과하면 하나의 Cloud Run 서비스로 배포합니다. 별도의 검증 환경에서 DB 변경과 주요 API를 확인한 뒤 운영 환경에 반영하는 단계와 롤백 절차가 필요합니다.
