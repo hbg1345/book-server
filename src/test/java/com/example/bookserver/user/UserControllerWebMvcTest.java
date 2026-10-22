@@ -23,15 +23,15 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper.document;
+import static com.example.bookserver.docs.ApiDocumentation.document;
 import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath;
 import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.delete;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.get;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.post;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -74,13 +74,13 @@ class UserControllerWebMvcTest {
                 .andExpect(jsonPath("$.userUuid").value(uuid.toString()))
                 .andDo(document("user-register",
                         requestFields(
-                                fieldWithPath("userId").description("Login id (must be unique)"),
-                                fieldWithPath("password").description("Raw password (sent in plaintext, stored hashed)"),
-                                fieldWithPath("userName").description("User's name"),
-                                fieldWithPath("phone").description("Phone number (format 010-1234-5678)"),
-                                fieldWithPath("birthDate").description("Birth date (yyyy-MM-dd)")),
+                                fieldWithPath("userId").description("로그인 아이디(중복 불가)"),
+                                fieldWithPath("password").description("가입할 비밀번호(서버에서 해시하여 저장)"),
+                                fieldWithPath("userName").description("회원 이름"),
+                                fieldWithPath("phone").description("전화번호(예: 010-1234-5678)"),
+                                fieldWithPath("birthDate").description("생년월일(yyyy-MM-dd)")),
                         responseFields(
-                                fieldWithPath("userUuid").description("UUID of the newly created user"))));
+                                fieldWithPath("userUuid").description("가입한 회원 식별자(UUID)"))));
 
         verify(userService).register("jdoe", "secret", "Jane Doe",
                 "010-1234-5678", LocalDate.of(1990, 5, 20));
@@ -98,7 +98,8 @@ class UserControllerWebMvcTest {
                                 {"userId":"jdoe","password":"secret","userName":"Jane Doe",
                                  "phone":"010-1234-5678","birthDate":"1990-05-20"}
                                 """))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict())
+                .andDo(document("user-register--register_returns409_whenDuplicate"));
     }
 
     // invalid body -> 400 problem+json with per-field errors; service never reached
@@ -113,7 +114,8 @@ class UserControllerWebMvcTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.errors.userId").exists())
-                .andExpect(jsonPath("$.errors.phone").value("must match the format 010-1234-5678"));
+                .andExpect(jsonPath("$.errors.phone").value("must match the format 010-1234-5678"))
+                .andDo(document("user-register--register_returns400WithFieldErrors_whenInvalid"));
 
         verify(userService, never()).register(any(), any(), any(), any(), any());
     }
@@ -122,7 +124,8 @@ class UserControllerWebMvcTest {
     @Test
     void me_returns401_whenNotAuthenticated() throws Exception {
         mockMvc.perform(get("/api/users/me"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andDo(document("user-me--me_returns401_whenNotAuthenticated"));
     }
 
     // /me authenticated -> 200 and the profile JSON never carries the password
@@ -142,12 +145,43 @@ class UserControllerWebMvcTest {
                 .andExpect(jsonPath("$.password").doesNotExist())
                 .andDo(document("user-me",
                         responseFields(
-                                fieldWithPath("userUuid").description("User UUID"),
-                                fieldWithPath("userId").description("Login id"),
-                                fieldWithPath("userName").description("User's name"),
-                                fieldWithPath("phone").description("Phone number"),
-                                fieldWithPath("birthDate").description("Birth date"),
-                                fieldWithPath("createdAt").description("Account creation timestamp"))));
+                                fieldWithPath("userUuid").description("회원 식별자(UUID)"),
+                                fieldWithPath("userId").description("로그인 아이디"),
+                                fieldWithPath("userName").description("회원 이름"),
+                                fieldWithPath("phone").description("전화번호"),
+                                fieldWithPath("birthDate").description("생년월일"),
+                                fieldWithPath("createdAt").description("가입 일시"))));
+    }
+
+    @Test
+    void updateProfile_updatesTheAuthenticatedUser() throws Exception {
+        UUID uuid = UUID.randomUUID();
+        mockMvc.perform(put("/api/users/me").with(asUser(uuid))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"userName":"홍길동","phone":"010-1234-5678","birthDate":"1990-05-20"}
+                                """))
+                .andExpect(status().isOk())
+                .andDo(document("user-update", requestFields(
+                        fieldWithPath("userName").description("회원 이름(최대 100자)"),
+                        fieldWithPath("phone").description("전화번호(예: 010-1234-5678)"),
+                        fieldWithPath("birthDate").description("생년월일(yyyy-MM-dd, 과거 날짜)"))));
+        verify(userService).updateProfile(uuid, "홍길동", "010-1234-5678", LocalDate.of(1990, 5, 20));
+    }
+
+    @Test
+    void changePassword_acceptsTheCurrentPassword() throws Exception {
+        UUID uuid = UUID.randomUUID();
+        mockMvc.perform(put("/api/users/me/password").with(asUser(uuid))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"oldsecret","newPassword":"newsecret"}
+                                """))
+                .andExpect(status().isOk())
+                .andDo(document("user-password", requestFields(
+                        fieldWithPath("currentPassword").description("현재 비밀번호"),
+                        fieldWithPath("newPassword").description("새 비밀번호"))));
+        verify(userService).changePassword(uuid, "oldsecret", "newsecret");
     }
 
     // changePassword with a wrong current password -> 400
@@ -162,7 +196,8 @@ class UserControllerWebMvcTest {
                         .content("""
                                 {"currentPassword":"wrong","newPassword":"newsecret"}
                                 """))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andDo(document("user-password--changePassword_returns400_whenCurrentWrong"));
     }
 
     // withdraw: delegates to the service with the authenticated user
@@ -171,7 +206,8 @@ class UserControllerWebMvcTest {
         UUID uuid = UUID.randomUUID();
 
         mockMvc.perform(delete("/api/users/me").with(asUser(uuid)))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andDo(document("user-withdraw"));
 
         verify(userService).withdraw(uuid);
     }

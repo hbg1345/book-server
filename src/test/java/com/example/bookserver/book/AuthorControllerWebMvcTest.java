@@ -19,15 +19,15 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper.document;
+import static com.example.bookserver.docs.ApiDocumentation.document;
 import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath;
 import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
 import static org.springframework.restdocs.request.RequestDocumentation.parameterWithName;
 import static org.springframework.restdocs.request.RequestDocumentation.queryParameters;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.get;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -64,9 +64,9 @@ class AuthorControllerWebMvcTest {
                 .andExpect(jsonPath("$.authorUuid").value(uuid.toString()))
                 .andDo(document("author-create",
                         requestFields(
-                                fieldWithPath("authorName").description("Author's name")),
+                                fieldWithPath("authorName").description("저자 이름")),
                         responseFields(
-                                fieldWithPath("authorUuid").description("UUID of the newly created author"))));
+                                fieldWithPath("authorUuid").description("등록된 저자 식별자(UUID)"))));
 
         verify(authorService).create("Robert Martin");
     }
@@ -82,7 +82,8 @@ class AuthorControllerWebMvcTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
-                .andExpect(jsonPath("$.errors.authorName").exists());
+                .andExpect(jsonPath("$.errors.authorName").exists())
+                .andDo(document("author-create--create_returns400_whenNameBlank"));
 
         verify(authorService, never()).create(any());
     }
@@ -100,18 +101,19 @@ class AuthorControllerWebMvcTest {
                 .andExpect(jsonPath("$[0].books[0]").value("Refactoring"))
                 .andDo(document("author-search",
                         queryParameters(
-                                parameterWithName("name").description("Exact author name to search for")),
+                                parameterWithName("name").description("검색할 저자 이름(정확히 일치)")),
                         responseFields(
-                                fieldWithPath("[].authorUuid").description("Author UUID"),
-                                fieldWithPath("[].authorName").description("Author name"),
-                                fieldWithPath("[].books").description("Titles of books this author wrote"))));
+                                fieldWithPath("[].authorUuid").description("저자 식별자(UUID)"),
+                                fieldWithPath("[].authorName").description("저자 이름"),
+                                fieldWithPath("[].books").description("해당 저자의 도서 제목 목록"))));
     }
 
     // missing required 'name' query param -> 400
     @Test
     void search_returns400_whenNameMissing() throws Exception {
         mockMvc.perform(get("/api/authors"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andDo(document("author-search--search_returns400_whenNameMissing"));
 
         verify(authorService, never()).searchByName(any());
     }
@@ -124,7 +126,8 @@ class AuthorControllerWebMvcTest {
                         .content("""
                                 {"authorName":"Robert Martin"}
                                 """))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andDo(document("author-create--create_returns401_whenAnonymous"));
 
         verify(authorService, never()).create(any());
     }
@@ -138,7 +141,8 @@ class AuthorControllerWebMvcTest {
                         .content("""
                                 {"authorName":"Robert Martin"}
                                 """))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andDo(document("author-create--create_returns403_whenNotAdmin"));
 
         verify(authorService, never()).create(any());
     }

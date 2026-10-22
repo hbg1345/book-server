@@ -217,8 +217,8 @@ tasks.named('asciidoctor') {
 // `server` is the deployed Cloud Run URL so Swagger UI's "Try it out" hits the live API.
 openapi3 {
     server = 'https://book-server-912285810536.asia-northeast3.run.app'
-    title = 'Book Server API'
-    description = 'Online bookstore REST API (JWT auth: send Authorization: Bearer <accessToken>).'
+    title = '온라인 서점 API'
+    description = '회원, 도서, 장바구니와 주문을 처리하는 REST API입니다. 회원 인증에는 로그인 응답의 accessToken을 사용합니다. 결제 연동은 Stripe 테스트 환경입니다.'
     version = project.version
     format = 'yaml'
     outputDirectory = 'build/api-spec'

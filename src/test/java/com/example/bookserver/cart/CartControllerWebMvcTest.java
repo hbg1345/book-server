@@ -25,15 +25,15 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper.document;
+import static com.example.bookserver.docs.ApiDocumentation.document;
 import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath;
 import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.delete;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.get;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.post;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -70,8 +70,8 @@ class CartControllerWebMvcTest {
                 .andExpect(status().isCreated())
                 .andDo(document("cart-add-item",
                         requestFields(
-                                fieldWithPath("bookUuid").description("UUID of the book to add"),
-                                fieldWithPath("quantity").description("How many to add (>= 1)"))));
+                                fieldWithPath("bookUuid").description("추가할 도서 식별자(UUID)"),
+                                fieldWithPath("quantity").description("추가할 수량(1 이상)"))));
 
         verify(cartService).addItem(user, book, 2);
     }
@@ -82,7 +82,8 @@ class CartControllerWebMvcTest {
         mockMvc.perform(post("/api/cart/items")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"bookUuid\":\"" + UUID.randomUUID() + "\",\"quantity\":2}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andDo(document("cart-add-item--addItem_returns401_whenNotAuthenticated"));
 
         verify(cartService, never()).addItem(any(), any(), org.mockito.ArgumentMatchers.anyInt());
     }
@@ -95,7 +96,8 @@ class CartControllerWebMvcTest {
         mockMvc.perform(post("/api/cart/items").with(asUser(user))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"bookUuid\":\"" + UUID.randomUUID() + "\",\"quantity\":0}"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andDo(document("cart-add-item--addItem_returns400_whenQuantityInvalid"));
 
         verify(cartService, never()).addItem(any(), any(), org.mockito.ArgumentMatchers.anyInt());
     }
@@ -111,7 +113,8 @@ class CartControllerWebMvcTest {
         mockMvc.perform(post("/api/cart/items").with(asUser(user))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"bookUuid\":\"" + book + "\",\"quantity\":1}"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andDo(document("cart-add-item--addItem_returns404_whenBookMissing"));
     }
 
     // list: 200 with the caller's items, enriched with title, price and line subtotal.
@@ -132,12 +135,12 @@ class CartControllerWebMvcTest {
                 .andExpect(jsonPath("$[0].lineTotal").value(119.97))   // 39.99 * 3
                 .andDo(document("cart-list",
                         responseFields(
-                                fieldWithPath("[].bookUuid").description("UUID of the book"),
-                                fieldWithPath("[].bookTitle").description("Book title"),
-                                fieldWithPath("[].price").description("Unit price of the book"),
-                                fieldWithPath("[].quantity").description("Quantity in the cart"),
-                                fieldWithPath("[].lineTotal").description("price × quantity for this line"),
-                                fieldWithPath("[].createdAt").description("When the book was added"))));
+                                fieldWithPath("[].bookUuid").description("도서 식별자(UUID)"),
+                                fieldWithPath("[].bookTitle").description("도서 제목"),
+                                fieldWithPath("[].price").description("도서 한 권의 가격"),
+                                fieldWithPath("[].quantity").description("장바구니 수량"),
+                                fieldWithPath("[].lineTotal").description("항목 금액(단가 × 수량)"),
+                                fieldWithPath("[].createdAt").description("장바구니 추가 일시"))));
     }
 
     // change quantity: 200; delegates with the authenticated user.
@@ -146,13 +149,13 @@ class CartControllerWebMvcTest {
         UUID user = UUID.randomUUID();
         UUID book = UUID.randomUUID();
 
-        mockMvc.perform(put("/api/cart/items/" + book).with(asUser(user))
+        mockMvc.perform(put("/api/cart/items/{bookUuid}", book).with(asUser(user))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"quantity\":5}"))
                 .andExpect(status().isOk())
                 .andDo(document("cart-change-quantity",
                         requestFields(
-                                fieldWithPath("quantity").description("New quantity (>= 1)"))));
+                                fieldWithPath("quantity").description("변경할 수량(1 이상)"))));
 
         verify(cartService).changeQuantity(user, book, 5);
     }
@@ -165,10 +168,11 @@ class CartControllerWebMvcTest {
         doThrow(new CartItemNotFoundException(book))
                 .when(cartService).changeQuantity(eq(user), eq(book), eq(5));
 
-        mockMvc.perform(put("/api/cart/items/" + book).with(asUser(user))
+        mockMvc.perform(put("/api/cart/items/{bookUuid}", book).with(asUser(user))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"quantity\":5}"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andDo(document("cart-change-quantity--changeQuantity_returns404_whenNotInCart"));
     }
 
     // remove: 200; delegates with the authenticated user.
@@ -177,7 +181,7 @@ class CartControllerWebMvcTest {
         UUID user = UUID.randomUUID();
         UUID book = UUID.randomUUID();
 
-        mockMvc.perform(delete("/api/cart/items/" + book).with(asUser(user)))
+        mockMvc.perform(delete("/api/cart/items/{bookUuid}", book).with(asUser(user)))
                 .andExpect(status().isOk())
                 .andDo(document("cart-remove-item"));
 

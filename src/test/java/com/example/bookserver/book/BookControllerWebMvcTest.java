@@ -27,7 +27,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper.document;
+import static com.example.bookserver.docs.ApiDocumentation.document;
 import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath;
 import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
@@ -35,10 +35,10 @@ import static org.springframework.restdocs.payload.JsonFieldType.ARRAY;
 import static org.springframework.restdocs.request.RequestDocumentation.parameterWithName;
 import static org.springframework.restdocs.request.RequestDocumentation.queryParameters;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.delete;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.get;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.post;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -87,21 +87,17 @@ class BookControllerWebMvcTest {
                 .andExpect(jsonPath("$.bookUuid").value(uuid.toString()))
                 .andDo(document("book-create",
                         requestFields(
-                                fieldWithPath("isbn").description(
-                                        "ISBN-13: thirteen digits, 978/979 prefix, valid check "
-                                                + "digit. Unique across the catalogue, so "
-                                                + "resubmitting a book is a 409 rather than a "
-                                                + "second copy of it"),
-                                fieldWithPath("bookTitle").description("Book title"),
-                                fieldWithPath("bookDescription").description("Description (optional)"),
-                                fieldWithPath("price").description("Price (> 0, up to 2 decimals)"),
-                                fieldWithPath("publishDate").description("Publish date (yyyy-MM-dd)"),
-                                fieldWithPath("publisher").description("Publisher"),
-                                fieldWithPath("inventory").description("Stock on hand (>= 0)"),
-                                fieldWithPath("authorUuids").type(ARRAY)
-                                        .description("UUIDs of existing authors to link (optional)")),
+                                fieldWithPath("isbn").description("13자리 ISBN(978/979로 시작하며 체크 숫자가 유효해야 합니다). 중복 등록은 409를 반환합니다"),
+                                fieldWithPath("bookTitle").description("도서 제목"),
+                                fieldWithPath("bookDescription").optional().description("도서 설명(선택)"),
+                                fieldWithPath("price").description("가격(0 초과, 소수점 둘째 자리 이내)"),
+                                fieldWithPath("publishDate").description("출판일(yyyy-MM-dd)"),
+                                fieldWithPath("publisher").description("출판사"),
+                                fieldWithPath("inventory").description("초기 재고(0 이상)"),
+                                fieldWithPath("authorUuids").type(ARRAY).optional()
+                                        .description("연결할 기존 저자 식별자 목록(선택)")),
                         responseFields(
-                                fieldWithPath("bookUuid").description("UUID of the newly created book"))));
+                                fieldWithPath("bookUuid").description("등록된 도서 식별자(UUID)"))));
 
         verify(bookService).create(any(BookRequest.class));
     }
@@ -120,7 +116,8 @@ class BookControllerWebMvcTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.errors.bookTitle").exists())
-                .andExpect(jsonPath("$.errors.price").exists());
+                .andExpect(jsonPath("$.errors.price").exists())
+                .andDo(document("book-create--create_returns400WithFieldErrors_whenInvalid"));
 
         verify(bookService, never()).create(any());
     }
@@ -133,7 +130,8 @@ class BookControllerWebMvcTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(CREATE_BODY.replace("9780134494166", "9780134494167")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errors.isbn").exists());
+                .andExpect(jsonPath("$.errors.isbn").exists())
+                .andDo(document("book-create--create_returns400_whenTheIsbnIsMalformed"));
 
         verify(bookService, never()).create(any());
     }
@@ -149,7 +147,8 @@ class BookControllerWebMvcTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(CREATE_BODY))
                 .andExpect(status().isConflict())
-                .andExpect(content().contentTypeCompatibleWith("application/problem+json"));
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andDo(document("book-create--create_returns409_whenTheIsbnAlreadyExists"));
     }
 
     // get: 200 with the book and its authors
@@ -168,17 +167,17 @@ class BookControllerWebMvcTest {
                 .andExpect(jsonPath("$.authors[0].authorName").value("Robert Martin"))
                 .andDo(document("book-get",
                         responseFields(
-                                fieldWithPath("bookUuid").description("Book UUID"),
-                                fieldWithPath("isbn").description("ISBN-13"),
-                                fieldWithPath("bookTitle").description("Book title"),
-                                fieldWithPath("bookDescription").description("Description"),
-                                fieldWithPath("price").description("Price"),
-                                fieldWithPath("publishDate").description("Publish date"),
-                                fieldWithPath("publisher").description("Publisher"),
-                                fieldWithPath("inventory").description("Stock on hand"),
-                                fieldWithPath("authors").description("Authors of the book"),
-                                fieldWithPath("authors[].authorUuid").description("Author UUID"),
-                                fieldWithPath("authors[].authorName").description("Author name"))));
+                                fieldWithPath("bookUuid").description("도서 식별자(UUID)"),
+                                fieldWithPath("isbn").description("13자리 ISBN"),
+                                fieldWithPath("bookTitle").description("도서 제목"),
+                                fieldWithPath("bookDescription").optional().description("도서 설명"),
+                                fieldWithPath("price").description("가격"),
+                                fieldWithPath("publishDate").description("출판일"),
+                                fieldWithPath("publisher").description("출판사"),
+                                fieldWithPath("inventory").description("현재 재고"),
+                                fieldWithPath("authors").description("저자 목록"),
+                                fieldWithPath("authors[].authorUuid").description("저자 식별자(UUID)"),
+                                fieldWithPath("authors[].authorName").description("저자 이름"))));
     }
 
     // get on a missing id -> 404
@@ -188,14 +187,16 @@ class BookControllerWebMvcTest {
         when(bookService.get(bookUuid)).thenThrow(new BookNotFoundException(bookUuid));
 
         mockMvc.perform(get("/api/books/{bookUuid}", bookUuid))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andDo(document("book-get--get_returns404_whenAbsent"));
     }
 
     // The collection endpoint is search-only: ?title= states what the user is looking for.
     @Test
     void search_returnsMatchingBooks() throws Exception {
         Book book = new Book(UUID.randomUUID(), Isbns.next(), "Clean Architecture", "desc",
-                new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10, null);
+                new BigDecimal("39.99"), LocalDate.of(2021, 1, 1), "Wikibooks", 10,
+                List.of(new Author(UUID.randomUUID(), "Robert Martin")));
         when(bookService.search("clean", 0))
                 .thenReturn(new BookPage(List.of(book), 0, 20, 1));
 
@@ -210,12 +211,25 @@ class BookControllerWebMvcTest {
                 .andExpect(jsonPath("$.nextBlockPage").isEmpty())
                 .andDo(document("book-search",
                         queryParameters(
-                                parameterWithName("title").description(
-                                        "Required book-title query. Results are case-insensitive, "
-                                                + "typo-tolerant, and ordered by relevance."),
-                                parameterWithName("page").optional().description(
-                                        "Zero-based result page; defaults to 0. Each page "
-                                                + "contains at most 20 books."))));
+                                parameterWithName("title").description("검색할 도서 제목(필수). 대소문자를 구분하지 않고 오타를 허용하며 관련도순으로 정렬합니다"),
+                                parameterWithName("page").optional().description("페이지 번호(0부터 시작, 기본값 0). 한 페이지에 최대 20권을 반환합니다")),
+                        responseFields(
+                                fieldWithPath("content").description("검색된 도서 목록"),
+                                fieldWithPath("content[].bookUuid").description("도서 식별자(UUID)"),
+                                fieldWithPath("content[].isbn").description("13자리 ISBN"),
+                                fieldWithPath("content[].bookTitle").description("도서 제목"),
+                                fieldWithPath("content[].bookDescription").description("도서 설명"),
+                                fieldWithPath("content[].price").description("가격"),
+                                fieldWithPath("content[].publishDate").description("출판일(yyyy-MM-dd)"),
+                                fieldWithPath("content[].publisher").description("출판사"),
+                                fieldWithPath("content[].inventory").description("현재 재고"),
+                                fieldWithPath("content[].authors").description("저자 목록"),
+                                fieldWithPath("content[].authors[].authorUuid").description("저자 식별자(UUID)"),
+                                fieldWithPath("content[].authors[].authorName").description("저자 이름"),
+                                fieldWithPath("page").description("현재 페이지 번호(0부터 시작)"),
+                                fieldWithPath("size").description("페이지당 최대 도서 수"),
+                                fieldWithPath("visiblePages").description("조회 가능한 페이지 번호 목록"),
+                                fieldWithPath("nextBlockPage").type(org.springframework.restdocs.payload.JsonFieldType.NUMBER).optional().description("다음 페이지 묶음의 시작 번호. 없으면 null"))));
     }
 
     // a blank title is a search with nothing to search for -> 400, not the whole catalogue
@@ -224,7 +238,8 @@ class BookControllerWebMvcTest {
         when(bookService.search("  ", 0)).thenThrow(new BlankSearchQueryException());
 
         mockMvc.perform(get("/api/books").param("title", "  "))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andDo(document("book-search--search_returns400_whenTitleBlank"));
 
     }
 
@@ -246,7 +261,8 @@ class BookControllerWebMvcTest {
         mockMvc.perform(get("/api/books")
                         .param("title", "clean")
                         .param("page", "-1"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andDo(document("book-search--search_returns400_whenPageIsNegative"));
     }
 
     // update: delegates to the service with the path uuid and parsed body
@@ -258,7 +274,14 @@ class BookControllerWebMvcTest {
                         .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(UPDATE_BODY))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andDo(document("book-update", requestFields(
+                        fieldWithPath("bookTitle").description("도서 제목"),
+                        fieldWithPath("bookDescription").optional().description("도서 설명(선택)"),
+                        fieldWithPath("price").description("가격(0 초과, 소수점 둘째 자리 이내)"),
+                        fieldWithPath("publishDate").description("출판일(yyyy-MM-dd)"),
+                        fieldWithPath("publisher").description("출판사"),
+                        fieldWithPath("authorUuids").type(ARRAY).optional().description("연결할 기존 저자 식별자 목록(선택)"))));
 
         verify(bookService).update(eq(bookUuid), any(UpdateBookRequest.class));
     }
@@ -274,7 +297,8 @@ class BookControllerWebMvcTest {
                         .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(UPDATE_BODY))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andDo(document("book-update--update_returns404_whenAbsent"));
     }
 
     // stock: the delta reaches the service and the new total comes back
@@ -291,13 +315,9 @@ class BookControllerWebMvcTest {
                 .andExpect(jsonPath("$.inventory").value(30))
                 .andDo(document("book-stock-adjust",
                         requestFields(
-                                fieldWithPath("delta").description(
-                                        "Copies to add (positive) or remove (negative). Not "
-                                                + "idempotent: sending the same body twice moves "
-                                                + "the stock twice")),
+                                fieldWithPath("delta").description("재고 증감 수량(양수: 입고, 음수: 차감). 동일 요청을 반복하면 재고도 반복 변경됩니다")),
                         responseFields(
-                                fieldWithPath("inventory").description(
-                                        "Stock on hand after the adjustment"))));
+                                fieldWithPath("inventory").description("조정 후 재고 수량"))));
     }
 
     // writing off more than the shop holds -> 409, not a negative stock level
@@ -312,7 +332,8 @@ class BookControllerWebMvcTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"delta\":-11}"))
                 .andExpect(status().isConflict())
-                .andExpect(content().contentTypeCompatibleWith("application/problem+json"));
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andDo(document("book-stock-adjust--adjustStock_returns409_whenItWouldGoNegative"));
     }
 
     // moving stock is a catalogue write, so it is ADMIN-only like the rest of them
@@ -322,7 +343,8 @@ class BookControllerWebMvcTest {
                         .with(user("shopper").roles("USER"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"delta\":20}"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andDo(document("book-stock-adjust--adjustStock_returns403_whenNotAdmin"));
 
         verify(bookService, never()).adjustStock(any(), anyInt());
     }
@@ -334,7 +356,8 @@ class BookControllerWebMvcTest {
 
         mockMvc.perform(delete("/api/books/{bookUuid}", bookUuid)
                         .with(user("admin").roles("ADMIN")))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andDo(document("book-delete"));
 
         verify(bookService).delete(bookUuid);
     }
@@ -345,7 +368,8 @@ class BookControllerWebMvcTest {
         mockMvc.perform(post("/api/books")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(CREATE_BODY))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andDo(document("book-create--create_returns401_whenAnonymous"));
 
         verify(bookService, never()).create(any());
     }
@@ -357,7 +381,8 @@ class BookControllerWebMvcTest {
                         .with(user("bob").roles("USER"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(CREATE_BODY))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andDo(document("book-create--create_returns403_whenNotAdmin"));
 
         verify(bookService, never()).create(any());
     }
@@ -366,7 +391,8 @@ class BookControllerWebMvcTest {
     @Test
     void search_requiresTitle() throws Exception {
         mockMvc.perform(get("/api/books"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andDo(document("book-search--search_requiresTitle"));
 
         verify(bookService, never()).search(any(), anyInt());
     }

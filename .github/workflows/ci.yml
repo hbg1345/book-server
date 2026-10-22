@@ -86,7 +86,8 @@ jobs:
   # Build the app image, push it to Artifact Registry, and roll out a new Cloud Run
   # revision. Only on push to master, and only after tests pass (needs: test).
   deploy:
-    if: github.event_name == 'push'
+    # Documentation-only commits publish Pages without deploying the application.
+    if: github.event_name == 'push' && !contains(github.event.head_commit.message, '[docs only]')
     needs: test
     runs-on: ubuntu-latest
 

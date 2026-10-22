@@ -1,37 +1,126 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>Book Server API</title>
+  <title>온라인 서점 API 문서</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #243247; background: #f7f9fc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif; }
+    .guide { max-width: 1460px; margin: 0 auto; padding: 32px 20px 12px; }
+    .heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .heading h1 { margin: 6px 0 12px; font-size: 30px; letter-spacing: -1px; }
+    .eyebrow { margin: 0; color: #526783; font-size: 13px; font-weight: 600; }
+    .repo { color: #3158a7; font-size: 14px; text-decoration: none; white-space: nowrap; }
+    .lead { line-height: 1.8; font-size: 15px; margin: 0 0 14px; }
+    .note { margin: 0 0 20px; color: #526783; font-size: 13px; line-height: 1.8; }
+    .guide details { border: 1px solid #dce3ed; border-radius: 8px; background: #fff; margin: 10px 0; padding: 13px 17px; font-size: 14px; }
+    .guide summary { cursor: pointer; font-weight: 600; }
+    .guide li { margin: 10px 0; line-height: 1.8; padding-left: 3px; }
+    .guide code { background: #edf2fa; color: #244479; padding: 2px 5px; border-radius: 4px; font-size: 12px; overflow-wrap: anywhere; }
+    .guide table { width: 100%; border-collapse: collapse; margin: 15px 0 5px; }
+    .guide th, .guide td { border-top: 1px solid #e6ebf2; padding: 10px; text-align: left; line-height: 1.7; }
+    .guide th { width: 85px; }
+    .swagger-ui .wrapper { max-width: 1460px; padding: 0 20px; }
+    .swagger-ui .info { display: none; }
+    .swagger-ui .scheme-container { margin-top: 8px; box-shadow: none; border-top: 1px solid #e4e9f1; border-bottom: 1px solid #e4e9f1; }
+    .swagger-ui .opblock-tag { font-size: 21px; }
+    .swagger-ui .opblock .opblock-summary-description { font-size: 14px; }
+    .swagger-ui .renderedMarkdown p { line-height: 1.8; }
+    #load-error { color: #a42424; white-space: pre-wrap; }
+    @media (max-width: 600px) { .guide { padding-top: 20px; } .heading h1 { font-size: 25px; } .swagger-ui .opblock .opblock-summary { flex-wrap: wrap; gap: 4px; } }
+  </style>
 </head>
 <body>
+  <header class="guide">
+    <div class="heading">
+      <div><p class="eyebrow">개인 프로젝트 · API 문서</p><h1>온라인 서점 API</h1></div>
+      <a class="repo" href="https://github.com/hbg1345/book-server">GitHub 저장소 ↗</a>
+    </div>
+    <p class="lead">회원, 도서 검색, 장바구니와 주문 기능을 제공합니다. 아래에서 기능별 요청 형식과 응답 예시를 확인할 수 있습니다.</p>
+    <p class="note">실행 요청은 배포된 Cloud Run 서버로 전송됩니다. 결제·환불 연동은 Stripe 테스트 환경이며 프론트엔드는 구현하지 않았습니다.</p>
+    <details>
+      <summary>처음 사용한다면 — 회원 가입과 주문 순서</summary>
+      <ol>
+        <li><strong>회원 가입:</strong> <code>POST /api/users</code>로 계정을 생성합니다.</li>
+        <li><strong>로그인:</strong> <code>POST /api/auth/login</code> 응답의 <code>accessToken</code>을 복사합니다. 아래 <strong>Authorize</strong>에 토큰 값만 입력합니다. <code>Bearer</code>는 자동으로 붙습니다.</li>
+        <li><strong>도서 검색:</strong> <code>GET /api/books</code>의 <code>title</code>에 제목을 입력합니다. 검색 결과의 <code>bookUuid</code>를 사용합니다.</li>
+        <li><strong>장바구니 추가:</strong> <code>POST /api/cart/items</code>에 도서 식별자와 수량을 전달합니다.</li>
+        <li><strong>주문 생성:</strong> <code>POST /api/orders</code>에 등록된 배송지의 <code>addressUuid</code> 또는 직접 입력한 <code>address</code> 중 하나를 전달합니다. 성공하면 <code>purchaseUuid</code>를 반환하고 장바구니가 비워집니다.</li>
+        <li><strong>결제 요청·상태 확인:</strong> <code>POST /api/orders/{purchaseUuid}/payment-intent</code>로 테스트 결제 요청을 생성합니다. 이 호출만으로 결제가 완료되지는 않습니다. 결제 수단 확인 후 Stripe의 성공 알림을 받아 주문 상태를 반영하며, <code>GET /api/orders/{purchaseUuid}</code>로 상태를 조회합니다.</li>
+      </ol>
+    </details>
+    <details>
+      <summary>인증·관리자 권한과 오류 응답 읽는 방법</summary>
+      <p class="lead">회원 가입, 로그인·토큰 갱신·로그아웃, 도서·저자 조회는 회원 인증 없이 호출할 수 있습니다. 장바구니·배송지·내 주문은 회원 인증이 필요합니다. 도서·저자 변경과 배송 준비·발송·배송 완료 처리는 관리자 권한이 필요합니다. 일반 회원 가입으로 관리자 권한이 부여되지는 않습니다.</p>
+      <table>
+        <tbody>
+          <tr><th>400</th><td>입력값 오류, 빈 장바구니 등. <code>detail</code>과 필드별 <code>errors</code>를 확인합니다.</td></tr>
+          <tr><th>401 / 403</th><td>인증 실패 / 권한 부족. 인증·권한 오류는 응답 본문이 없을 수 있습니다.</td></tr>
+          <tr><th>404</th><td>대상이 없거나 본인이 접근할 수 없는 주문·배송지입니다.</td></tr>
+          <tr><th>409</th><td>중복 정보, 재고 부족 또는 허용되지 않는 주문 상태 변경입니다.</td></tr>
+          <tr><th>502</th><td>외부 결제·환불 요청 처리에 실패했습니다.</td></tr>
+        </tbody>
+      </table>
+      <p class="note">각 API의 Responses에는 테스트에서 확인한 상태 코드와 실제 응답 예시를 표시합니다.</p>
+    </details>
+    <p id="load-error" role="alert" hidden></p>
+  </header>
   <div id="swagger-ui"></div>
   <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" crossorigin></script>
   <script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js" crossorigin></script>
   <script>
-    // The spec is generated from RestDocs tests (restdocs-api-spec) and copied next to this
-    // file by CI. That generator emits no security scheme, so we inject a JWT bearer scheme
-    // here at load time — that's what makes Swagger UI render the "Authorize" button.
+    // 테스트에서 생성한 명세에 Swagger UI용 Bearer 인증 방식을 연결합니다.
     fetch('./openapi3.yaml')
-      .then(function (res) { return res.text(); })
+      .then(function (res) { if (!res.ok) throw new Error('API 명세를 불러오지 못했습니다.'); return res.text(); })
       .then(function (text) {
         var spec = jsyaml.load(text);
         spec.components = spec.components || {};
         spec.components.securitySchemes = Object.assign({}, spec.components.securitySchemes, {
           bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }
         });
-        // Apply the requirement globally; endpoints like /api/cart/** need it.
         spec.security = [{ bearerAuth: [] }];
+        var tagOrder = ['인증', '회원', '배송지', '도서', '저자', '장바구니', '주문'];
+        var statusDescriptions = { '200': '요청 처리 성공', '201': '생성 성공', '400': '입력값 또는 요청 조건 오류', '401': '인증 실패', '403': '권한 부족', '404': '대상 없음 또는 접근 불가', '409': '중복 정보·재고 부족·주문 상태 충돌', '502': '외부 결제·환불 처리 실패' };
+        Object.keys(spec.paths).forEach(function (path) {
+          Object.keys(spec.paths[path]).forEach(function (method) {
+            if (!['get', 'post', 'put', 'delete', 'patch'].includes(method)) return;
+            var operation = spec.paths[path][method];
+            var isPublic = path.startsWith('/api/auth/') || (path === '/api/users' && method === 'post') || (method === 'get' && (path.startsWith('/api/books') || path.startsWith('/api/authors')));
+            operation.security = isPublic ? [] : [{ bearerAuth: [] }];
+            // 요청 예시는 정상 사례를 먼저 보여주고, 오류 예시는 해당 응답에 둡니다.
+            Object.values((operation.requestBody || {}).content || {}).forEach(function (media) {
+              Object.keys(media.examples || {}).forEach(function (key) {
+                if (key.includes('--')) delete media.examples[key];
+                else media.examples[key].summary = '정상 요청 예시';
+              });
+            });
+            Object.keys(operation.responses || {}).forEach(function (status) {
+              var response = operation.responses[status];
+              if (statusDescriptions[status] && (!response.description || /^\d+$/.test(response.description))) response.description = statusDescriptions[status];
+              Object.values(response.content || {}).forEach(function (media) {
+                Object.entries(media.examples || {}).forEach(function (entry, index) {
+                  entry[1].summary = (statusDescriptions[status] || status) + ' · 예시 ' + (index + 1);
+                });
+              });
+            });
+          });
+        });
         window.ui = SwaggerUIBundle({
           spec: spec,
           dom_id: '#swagger-ui',
           deepLinking: true,
           presets: [SwaggerUIBundle.presets.apis],
           persistAuthorization: true,
+          filter: true,
+          docExpansion: 'list',
+          defaultModelsExpandDepth: 0,
+          displayRequestDuration: true,
+          tagsSorter: function (a, b) { return tagOrder.indexOf(a) - tagOrder.indexOf(b); },
         });
-      });
+      })
+      .catch(function (error) { var message = document.getElementById('load-error'); message.hidden = false; message.textContent = error.message; });
   </script>
 </body>
 </html>

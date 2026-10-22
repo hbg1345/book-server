@@ -27,15 +27,15 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper.document;
+import static com.example.bookserver.docs.ApiDocumentation.document;
 import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath;
 import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.delete;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.get;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.post;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -83,16 +83,16 @@ class AddressControllerWebMvcTest {
                 .andExpect(jsonPath("$.addressUuid").value(newId.toString()))
                 .andDo(document("address-create",
                         requestFields(
-                                fieldWithPath("alias").description("User's label for this address, e.g. Home/Work"),
-                                fieldWithPath("recipient").description("Recipient name"),
-                                fieldWithPath("phone").description("Recipient phone"),
-                                fieldWithPath("country").description("ISO 3166-1 alpha-2 country code"),
-                                fieldWithPath("roadAddress").description("Street / road-name address line"),
-                                fieldWithPath("detailAddress").description("Unit/floor detail (optional)"),
-                                fieldWithPath("postalCode").description("Postal code (format validated per country)"),
-                                fieldWithPath("defaultAddress").description("Make this the user's default address")),
+                                fieldWithPath("alias").description("배송지 별칭(예: 집, 회사)"),
+                                fieldWithPath("recipient").description("수령인 이름"),
+                                fieldWithPath("phone").description("수령인 전화번호"),
+                                fieldWithPath("country").description("두 글자 국가 코드(예: KR)"),
+                                fieldWithPath("roadAddress").description("도로명 주소"),
+                                fieldWithPath("detailAddress").optional().description("상세 주소(선택)"),
+                                fieldWithPath("postalCode").description("우편번호(국가별 형식 검사)"),
+                                fieldWithPath("defaultAddress").description("기본 배송지 여부")),
                         responseFields(
-                                fieldWithPath("addressUuid").description("UUID of the newly saved address"))));
+                                fieldWithPath("addressUuid").description("등록된 배송지 식별자(UUID)"))));
 
         ArgumentCaptor<CreateAddressRequest> captor = ArgumentCaptor.forClass(CreateAddressRequest.class);
         verify(addressService).addAddress(eq(user), captor.capture());
@@ -109,7 +109,8 @@ class AddressControllerWebMvcTest {
         mockMvc.perform(post("/api/addresses")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andDo(document("address-create--addAddress_returns401_whenNotAuthenticated"));
 
         verify(addressService, never()).addAddress(any(), any());
     }
@@ -123,7 +124,8 @@ class AddressControllerWebMvcTest {
         mockMvc.perform(post("/api/addresses").with(asUser(user))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(invalid))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andDo(document("address-create--addAddress_returns400_whenBodyInvalid"));
 
         verify(addressService, never()).addAddress(any(), any());
     }
@@ -147,16 +149,16 @@ class AddressControllerWebMvcTest {
                 .andExpect(jsonPath("$[0].defaultAddress").value(true))
                 .andDo(document("address-list",
                         responseFields(
-                                fieldWithPath("[].addressUuid").description("UUID of the address"),
-                                fieldWithPath("[].alias").description("User's label for this address"),
-                                fieldWithPath("[].recipient").description("Recipient name"),
-                                fieldWithPath("[].phone").description("Recipient phone"),
-                                fieldWithPath("[].country").description("ISO 3166-1 alpha-2 country code"),
-                                fieldWithPath("[].roadAddress").description("Street / road-name address line"),
-                                fieldWithPath("[].detailAddress").description("Unit/floor detail (optional)"),
-                                fieldWithPath("[].postalCode").description("Postal code"),
-                                fieldWithPath("[].defaultAddress").description("Whether this is the user's default"),
-                                fieldWithPath("[].createdAt").description("When the address was saved"))));
+                                fieldWithPath("[].addressUuid").description("배송지 식별자(UUID)"),
+                                fieldWithPath("[].alias").description("배송지 별칭"),
+                                fieldWithPath("[].recipient").description("수령인 이름"),
+                                fieldWithPath("[].phone").description("수령인 전화번호"),
+                                fieldWithPath("[].country").description("두 글자 국가 코드(예: KR)"),
+                                fieldWithPath("[].roadAddress").description("도로명 주소"),
+                                fieldWithPath("[].detailAddress").description("상세 주소(선택)"),
+                                fieldWithPath("[].postalCode").description("우편번호"),
+                                fieldWithPath("[].defaultAddress").description("기본 배송지 여부"),
+                                fieldWithPath("[].createdAt").description("배송지 등록 일시"))));
     }
 
     // update: 200; delegates with the authenticated user, path id and parsed body.
@@ -165,11 +167,19 @@ class AddressControllerWebMvcTest {
         UUID user = UUID.randomUUID();
         UUID addressId = UUID.randomUUID();
 
-        mockMvc.perform(put("/api/addresses/" + addressId).with(asUser(user))
+        mockMvc.perform(put("/api/addresses/{addressUuid}", addressId).with(asUser(user))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
                 .andExpect(status().isOk())
-                .andDo(document("address-update"));
+                .andDo(document("address-update", requestFields(
+                        fieldWithPath("alias").description("배송지 별칭"),
+                        fieldWithPath("recipient").description("수령인 이름"),
+                        fieldWithPath("phone").description("수령인 전화번호"),
+                        fieldWithPath("country").description("두 글자 국가 코드(예: KR)"),
+                        fieldWithPath("roadAddress").description("도로명 주소"),
+                        fieldWithPath("detailAddress").optional().description("상세 주소(선택)"),
+                        fieldWithPath("postalCode").description("우편번호"),
+                        fieldWithPath("defaultAddress").description("기본 배송지 여부"))));
 
         verify(addressService).updateAddress(eq(user), eq(addressId), any());
     }
@@ -182,10 +192,11 @@ class AddressControllerWebMvcTest {
         doThrow(new AddressNotFoundException(addressId))
                 .when(addressService).updateAddress(eq(user), eq(addressId), any());
 
-        mockMvc.perform(put("/api/addresses/" + addressId).with(asUser(user))
+        mockMvc.perform(put("/api/addresses/{addressUuid}", addressId).with(asUser(user))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andDo(document("address-update--updateAddress_returns404_whenNotFound"));
     }
 
     // delete: 200; delegates with the authenticated user and path id.
@@ -194,7 +205,7 @@ class AddressControllerWebMvcTest {
         UUID user = UUID.randomUUID();
         UUID addressId = UUID.randomUUID();
 
-        mockMvc.perform(delete("/api/addresses/" + addressId).with(asUser(user)))
+        mockMvc.perform(delete("/api/addresses/{addressUuid}", addressId).with(asUser(user)))
                 .andExpect(status().isOk())
                 .andDo(document("address-delete"));
 
@@ -209,7 +220,8 @@ class AddressControllerWebMvcTest {
         doThrow(new AddressNotFoundException(addressId))
                 .when(addressService).deleteAddress(user, addressId);
 
-        mockMvc.perform(delete("/api/addresses/" + addressId).with(asUser(user)))
-                .andExpect(status().isNotFound());
+        mockMvc.perform(delete("/api/addresses/{addressUuid}", addressId).with(asUser(user)))
+                .andExpect(status().isNotFound())
+                .andDo(document("address-delete--deleteAddress_returns404_whenNotFound"));
     }
 }

@@ -15,11 +15,11 @@ import com.example.bookserver.user.InvalidCredentialsException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static com.epages.restdocs.apispec.MockMvcRestDocumentationWrapper.document;
+import static com.example.bookserver.docs.ApiDocumentation.document;
 import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath;
 import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
 import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -55,11 +55,11 @@ class AuthControllerWebMvcTest {
                 .andExpect(jsonPath("$.refreshToken").value("refresh-opaque"))
                 .andDo(document("auth-login",
                         requestFields(
-                                fieldWithPath("userId").description("Login id"),
-                                fieldWithPath("password").description("Password")),
+                                fieldWithPath("userId").description("로그인 아이디"),
+                                fieldWithPath("password").description("비밀번호")),
                         responseFields(
-                                fieldWithPath("accessToken").description("Short-lived JWT for the Authorization header"),
-                                fieldWithPath("refreshToken").description("Opaque token to obtain new access tokens"))));
+                                fieldWithPath("accessToken").description("인증 헤더에 사용하는 액세스 토큰(JWT)"),
+                                fieldWithPath("refreshToken").description("액세스 토큰 갱신에 사용하는 리프레시 토큰"))));
 
         verify(authService).login("jdoe", "secret");
     }
@@ -74,7 +74,8 @@ class AuthControllerWebMvcTest {
                         .content("""
                                 {"userId":"jdoe","password":"wrong"}
                                 """))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andDo(document("auth-login--login_returns401_whenBadCredentials"));
     }
 
     // refresh: 200 + a new token pair
@@ -93,10 +94,10 @@ class AuthControllerWebMvcTest {
                 .andExpect(jsonPath("$.refreshToken").value("new-refresh"))
                 .andDo(document("auth-refresh",
                         requestFields(
-                                fieldWithPath("refreshToken").description("The current refresh token")),
+                                fieldWithPath("refreshToken").description("현재 리프레시 토큰")),
                         responseFields(
-                                fieldWithPath("accessToken").description("A new access token"),
-                                fieldWithPath("refreshToken").description("A rotated refresh token (the old one is now dead)"))));
+                                fieldWithPath("accessToken").description("새 액세스 토큰"),
+                                fieldWithPath("refreshToken").description("새 리프레시 토큰. 기존 토큰은 폐기됩니다"))));
     }
 
     // refresh with an invalid/expired/replayed token -> 401
@@ -109,7 +110,8 @@ class AuthControllerWebMvcTest {
                         .content("""
                                 {"refreshToken":"stale"}
                                 """))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andDo(document("auth-refresh--refresh_returns401_whenInvalid"));
     }
 
     // logout: 200 and delegates to the service
@@ -123,7 +125,7 @@ class AuthControllerWebMvcTest {
                 .andExpect(status().isOk())
                 .andDo(document("auth-logout",
                         requestFields(
-                                fieldWithPath("refreshToken").description("The refresh token to revoke"))));
+                                fieldWithPath("refreshToken").description("폐기할 리프레시 토큰"))));
 
         verify(authService).logout("refresh-opaque");
     }
@@ -136,6 +138,7 @@ class AuthControllerWebMvcTest {
                         .content("""
                                 {"refreshToken":""}
                                 """))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andDo(document("auth-refresh--refresh_returns400_whenBlank"));
     }
 }
